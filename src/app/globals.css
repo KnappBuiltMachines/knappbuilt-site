@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  @apply bg-ink-900 text-zinc-100 font-body antialiased;
+  background-image: var(--tw-bg-grid, none);
+}
+
+/* Blueprint grid backdrop */
+.bg-blueprint {
+  background-color: #1a1a1a;
+  background-image:
+    linear-gradient(rgba(245,166,35,.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(245,166,35,.04) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+h1, h2, h3, h4, .font-display {
+  font-family: var(--font-display), system-ui, sans-serif;
+  letter-spacing: -0.025em;
+}
+
+/* Corner-bracket card accents */
+.bracket { position: relative; }
+.bracket::before, .bracket::after {
+  content: ""; position: absolute; width: 14px; height: 14px;
+  border-color: #f5a623; border-style: solid; opacity: .65;
+}
+.bracket::before { top: 8px; left: 8px; border-width: 2px 0 0 2px; }
+.bracket::after { bottom: 8px; right: 8px; border-width: 0 2px 2px 0; }
+
+@keyframes rise { to { opacity: 1; transform: none; } }
+.reveal { opacity: 0; transform: translateY(14px); animation: rise .6s ease forwards; }
