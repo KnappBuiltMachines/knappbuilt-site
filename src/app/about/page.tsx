@@ -10,17 +10,14 @@ export default function About() {
       title={<>A family-owned <span className="text-amber">manufacturer</span></>}
       intro="Founded in 2008 in Hammonton, New Jersey by the father-son duo John & Brandon Knapp."
     >
-      <div className="grid gap-10 md:grid-cols-2 md:items-center">
-        <div className="relative aspect-[4/5] overflow-hidden rounded-lg border border-ink-500 md:order-2">
-          <Image src="/photos/founders.jpg" alt="John and Brandon Knapp outside the Knapp-Built Machines shop" fill sizes="(max-width:768px) 100vw, 50vw" className="object-cover" />
-        </div>
-        <div className="md:order-1">
-          <p className="text-zinc-300 leading-relaxed">
-            Knapp-Built Machines specializes in custom agricultural packaging and vegetable
-            processing equipment, serving the local agriculture industry and farmers. The
-            company prides itself on high-quality products, quick lead times, and fair pricing.
-          </p>
-        </div>
+      <p className="max-w-3xl text-lg text-zinc-300 leading-relaxed">
+        Knapp-Built Machines specializes in custom agricultural packaging and vegetable
+        processing equipment, serving the local agriculture industry and farmers. The
+        company prides itself on high-quality products, quick lead times, and fair pricing.
+      </p>
+
+      <div className="relative mt-10 aspect-[3/2] max-w-3xl overflow-hidden rounded-lg border border-ink-500">
+        <Image src="/photos/founders.jpg" alt="John and Brandon Knapp outside the Knapp-Built Machines shop" fill sizes="(max-width:768px) 100vw, 768px" className="object-cover" />
       </div>
 
       <div className="mt-16 max-w-3xl">

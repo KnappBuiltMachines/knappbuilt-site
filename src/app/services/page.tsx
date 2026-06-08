@@ -14,7 +14,7 @@ export default function Services() {
     <PageShell
       kicker="Services"
       title={<>Support that keeps you <span className="text-amber">moving</span></>}
-      intro="Placeholder services — edit to match what you actually offer."
+      intro="From custom builds to on-site service, we keep your packing and processing lines running."
     >
       <div className="grid gap-5 md:grid-cols-2">
         {services.map(([t, d]) => (
