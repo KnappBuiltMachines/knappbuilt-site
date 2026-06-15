@@ -14,6 +14,46 @@ const caps = [
   ["Excel export", "Bill-of-materials and data that drops into your systems."],
 ];
 
+const shots: {
+  img: string; w: number; h: number; kicker: string; title: string; desc: string; why: string;
+}[] = [
+  {
+    img: "/screenshots/builder.jpg", w: 1500, h: 763,
+    kicker: "Pattern Engine",
+    title: "50+ optimized patterns, instantly",
+    desc: "Enter your case and pallet dimensions and Stack instantly generates dozens of layouts — each ranked by cubic efficiency, case support, and stability. You start from the best option, not a blank screen.",
+    why: "Stop guessing at Ti-Hi. See the most efficient, most stable pattern for your exact case in seconds.",
+  },
+  {
+    img: "/screenshots/layers-2d.jpg", w: 1500, h: 720,
+    kicker: "Layer Planning",
+    title: "Plan every layer, down to the case",
+    desc: "Step through the load one layer at a time — including alternating and interlocked layers — with exact case placement, orientation, and dimensions called out.",
+    why: "Gives your crew a clear, repeatable build map and fewer mistakes on the floor.",
+  },
+  {
+    img: "/screenshots/mixed-3d.jpg", w: 796, h: 632,
+    kicker: "Mixed-Case Loads",
+    title: "Multiple case sizes on one pallet",
+    desc: "Real shipments aren't one SKU. Combine different cases and box sizes, layer by layer, and see the finished unit load rendered in full 3D.",
+    why: "Build and document accurate mixed loads that match what actually ships.",
+  },
+  {
+    img: "/screenshots/truck-load.jpg", w: 1500, h: 426,
+    kicker: "Trailer Loading",
+    title: "Fill the trailer, keep it balanced",
+    desc: "Plan how pallets fit a 53' reefer, dry van, or custom trailer — with live pallet counts, column-and-row layout, and a center-of-mass balance check.",
+    why: "Maximize every trailer and cut freight cost per unit shipped.",
+  },
+  {
+    img: "/screenshots/report-builder.jpg", w: 1500, h: 855,
+    kicker: "Report Builder",
+    title: "Build the spec sheet you need",
+    desc: "Drag in 3D renders, 2D layer diagrams, and case, pallet, and truck stats to compose a custom, branded report — or start from a ready-made layout.",
+    why: "Hand customers and crews exactly the information they need, in your branding.",
+  },
+];
+
 export default function Software() {
   return (
     <PageShell
@@ -25,17 +65,31 @@ export default function Software() {
     >
       <Image src="/logo.png" alt="Knapp-Built Stack — Pallet Pattern Creator" width={1657} height={949} priority className="mb-10 h-20 w-auto" />
 
-      <p className="max-w-3xl text-zinc-300 leading-relaxed">
-        Knapp-Built Stack™ is our specialized pallet pattern design and optimization software
-        created for packaging professionals. Designed with packaging engineers in mind, the
-        platform goes far beyond traditional Ti-Hi calculations. Users can build complex
-        mixed-case pallet patterns, incorporate multiple case sizes on a single pallet,
-        customize pallet footprints ranging from quarter pallets to full and custom-sized
-        pallets, and optimize trailer loading configurations across multiple trailer sizes. By
-        combining flexibility, visualization, and engineering-focused tools, Knapp-Built Stack
-        helps companies improve pallet efficiency, maximize trailer utilization, reduce
-        transportation costs, and develop smarter packaging solutions.
-      </p>
+      <div className="max-w-3xl space-y-5 text-zinc-300 leading-relaxed">
+        <p>
+          Knapp-Built Machines was founded on solving real manufacturing problems through
+          custom equipment design. Over years of working alongside production teams and
+          packaging engineers, we discovered that many of the biggest inefficiencies began long
+          before products ever reached the line — they started with pallet decisions. So we
+          applied the same engineering mindset we use to build machines and created Knapp-Built
+          Stack™: a pallet pattern creator designed by people who understand the realities of
+          packaging, automation, warehousing, and transportation.
+        </p>
+        <p>
+          That same engineering focus runs through every part of the software. Knapp-Built
+          Stack™ goes far beyond traditional Ti-Hi calculations — build complex mixed-case
+          pallet patterns, place multiple case sizes on a single pallet, customize footprints
+          from quarter pallets to full and fully custom sizes, and optimize trailer loading
+          across multiple trailer types. By combining flexibility, real-time visualization, and
+          engineering-focused tools, it helps companies improve pallet efficiency, maximize
+          trailer utilization, reduce transportation costs, and develop smarter packaging
+          solutions.
+        </p>
+        <p className="text-zinc-200">
+          Our mission remains unchanged: build practical solutions that make manufacturing work
+          better — whether they're made of steel or software.
+        </p>
+      </div>
 
       <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {caps.map(([t, d]) => (
@@ -46,7 +100,67 @@ export default function Software() {
         ))}
       </div>
 
-      <div className="mt-12 rounded-lg border border-amber/50 bg-amber/5 p-8 text-center">
+      {/* Screenshot showcase */}
+      <div className="mt-20 border-t border-ink-600 pt-14">
+        <div className="text-center">
+          <div className="text-xs font-semibold uppercase tracking-[0.25em] text-amber">See it in action</div>
+          <h2 className="mt-3 text-3xl font-bold text-white sm:text-4xl">Inside the software</h2>
+          <p className="mx-auto mt-3 max-w-2xl text-zinc-300 leading-relaxed">
+            A look at the actual tools your team uses every day — from the pattern engine to
+            print-ready engineering reports.
+          </p>
+        </div>
+
+        <div className="mt-14 space-y-16">
+          {shots.map((s, i) => {
+            const flip = i % 2 === 1;
+            return (
+              <div key={s.img} className="grid items-center gap-8 md:grid-cols-2 md:gap-12">
+                <div className={flip ? "md:order-2" : ""}>
+                  <div className="overflow-hidden rounded-lg border border-ink-500 bg-ink-800 p-1.5 shadow-2xl shadow-black/40">
+                    <Image src={s.img} alt={s.title} width={s.w} height={s.h} className="h-auto w-full rounded" />
+                  </div>
+                </div>
+                <div className={flip ? "md:order-1" : ""}>
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-amber">{s.kicker}</div>
+                  <h3 className="mt-2 text-2xl font-bold text-white">{s.title}</h3>
+                  <p className="mt-3 text-zinc-300 leading-relaxed">{s.desc}</p>
+                  <p className="mt-4 border-l-2 border-amber/70 pl-4 text-sm leading-relaxed text-zinc-400">
+                    <span className="font-semibold text-amber">Why it matters — </span>{s.why}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Professional reports highlight */}
+        <div className="mt-16 rounded-lg border border-ink-500 bg-ink-850 p-8 sm:p-10">
+          <div className="max-w-2xl">
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-amber">Professional Output</div>
+            <h3 className="mt-2 text-2xl font-bold text-white">Export print-ready engineering reports</h3>
+            <p className="mt-3 text-zinc-300 leading-relaxed">
+              One click turns any pattern into a polished, branded Pallet Pattern Engineering
+              Report — complete with dimensions, cubic efficiency, support, stability, weight
+              breakdowns, and truck loading. Ready to print, email, or export to Excel.
+            </p>
+            <p className="mt-4 border-l-2 border-amber/70 pl-4 text-sm leading-relaxed text-zinc-400">
+              <span className="font-semibold text-amber">Why it matters — </span>
+              Look professional, keep specs on file, and give every job a documented paper trail.
+            </p>
+          </div>
+          <div className="mt-8 grid gap-6 sm:grid-cols-2">
+            <div className="overflow-hidden rounded-lg border border-ink-500 bg-white p-1.5 shadow-2xl shadow-black/40">
+              <Image src="/screenshots/report-standard.jpg" alt="Standard pallet pattern engineering report" width={1200} height={1528} className="h-auto w-full rounded" />
+            </div>
+            <div className="overflow-hidden rounded-lg border border-ink-500 bg-white p-1.5 shadow-2xl shadow-black/40">
+              <Image src="/screenshots/report-mixed.jpg" alt="Mixed-case pallet pattern engineering report" width={1188} height={1442} className="h-auto w-full rounded" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-16 rounded-lg border border-amber/50 bg-amber/5 p-8 text-center">
         <h2 className="text-2xl font-bold text-white">Ready to start designing?</h2>
         <p className="mt-2 text-zinc-300">Full access to the Pallet Pattern Creator, billed monthly.</p>
         <Link href="/pricing" className="mt-5 inline-block rounded bg-amber px-8 py-3.5 font-semibold uppercase tracking-wide text-ink-950 hover:bg-amber-light">
