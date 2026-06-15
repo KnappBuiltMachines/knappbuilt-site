@@ -485,6 +485,8 @@ tr:hover td{background:rgba(255,255,255,.04);cursor:pointer;}
     </div>
     <span id="selName" style="font-size:13px;color:var(--go);letter-spacing:1px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
     <span id="h3d" style="display:none;font-size:12px;color:var(--dm);">Drag·rotate · Scroll·zoom</span>
+    <!-- Interlock toggle — single-case 2D view only -->
+    <button id="interlockBtn" onclick="toggleInterlockMode()" style="display:none;background:#1a2535;color:#7ac8ff;border:1px solid #2a4060;border-radius:3px;padding:3px 10px;font-size:12px;font-family:'Share Tech Mono',monospace;cursor:pointer;letter-spacing:.5px;white-space:nowrap;" title="Alternate every other layer 180° for interlocking stability">🔄 INTERLOCK OFF</button>
     <!-- 3D dimension toggle — only visible in 3D view -->
     <button id="dimToggleBtn" onclick="toggle3DDims()" style="display:none;background:#333333;color:#aaaaaa;border:1px solid var(--bd);border-radius:3px;padding:3px 10px;font-size:12px;font-family:'Share Tech Mono',monospace;cursor:pointer;letter-spacing:.5px;white-space:nowrap;">📐 DIMS ON</button>
     <button id="maxHToggleBtn" onclick="toggle3DMaxH()" style="display:none;background:#333333;color:#aaaaaa;border:1px solid var(--bd);border-radius:3px;padding:3px 10px;font-size:12px;font-family:'Share Tech Mono',monospace;cursor:pointer;letter-spacing:.5px;white-space:nowrap;">⬜ MAX H ON</button>
@@ -599,6 +601,7 @@ let ST={
   isMetric:false, palletKey:'full', maxH:'', maxOverhang:'',
   cases:[{id:1,w:'',l:'',h:'',wt:'',color:COLORS[0],label:'Case A'}],
   layerStack:[],   // [{layerIdx, patternIdx, degree}] — per-layer overrides
+  interlockMode: false,  // single-case: alternate layers 180°
   view:'2d', patterns:[], selPat:0,
   multiMode:false, placements:[], layers:1, stats:null,
   layerEdits:{},  // current pattern's edits: {A:[...], B:[...]} — mirrors _patEdits[selPat]
@@ -939,497 +942,1160 @@ function newStability(hasInterlock, supportPct, centeringPct, ovW, ovL){
 }
 
 function buildPatterns(cW, cL, pW, pL){
-  const OH = (ST.maxOverhang===''||ST.maxOverhang===null||ST.maxOverhang===undefined)
-    ? 0 : parseFloat(ST.maxOverhang)||0;
-  const ohIn = ST.isMetric ? OH/25.4 : OH;
+  // ═══════════════════════════════════════════════════════════════════
+  // KNAPP-BUILT PATTERN ENGINE v5
+  // Exhaustive search: enumerates every structurally distinct row
+  // sequence that fits within the pallet, maximising case count.
+  //
+  // X = 90° case (footprint cL×cW)   O = 0° case (footprint cW×cL)
+  //
+  // CENTERING:  left_margin == right_margin,  top_margin == bottom_margin
+  // BILLBOARD:  outer faces flush with widest/tallest row extent
+  //             interior gaps distributed evenly between cases
+  // DEDUP:      canonical fingerprint catches exact + rot180 duplicates
+  // ═══════════════════════════════════════════════════════════════════
+  const OH=(ST.maxOverhang===''||ST.maxOverhang===null||ST.maxOverhang===undefined)?0:parseFloat(ST.maxOverhang)||0;
+  const ohIn=ST.isMetric?OH/25.4:OH;
+  const EPS=0.0001;
+  const rp=v=>Math.round(v*1e6)/1e6;
+  const r2=v=>Math.round(v*100)/100;
+  const palArea=pW*pL;
+  const maxW=pW+2*ohIn, maxL=pL+2*ohIn;
 
-  // Internal high-precision rounding (6 decimal places).
-  // This preserves accuracy for case dims like 10.375, 8.1875 etc.
-  // r2 (2dp) is only used for display strings via dp().
-  const rp = v => Math.round(v * 1000000) / 1000000;
+  // Case footprints
+  const W0=cW, D0=cL;   // O=0°: width×depth
+  const W9=cL, D9=cW;   // X=90°: width×depth
+  const can0=W0<=maxW+EPS&&D0<=maxL+EPS;
+  const can9=W9<=maxW+EPS&&D9<=maxL+EPS;
+  if(!can0&&!can9) return [];
 
-  const zoneW = Math.max(cW, pW + 2*ohIn);
-  const zoneL = Math.max(cL, pL + 2*ohIn);
+  // Max counts
+  const mC0=can0?Math.floor((maxW+EPS)/W0):0;
+  const mC9=can9?Math.floor((maxW+EPS)/W9):0;
+  const mR0=can0?Math.floor((maxL+EPS)/D0):0;
+  const mR9=can9?Math.floor((maxL+EPS)/D9):0;
 
-  const palArea = pW * pL;
-  const palUtilPct = pls => r2(pls.reduce((s,p)=>s+p.w*p.l,0)/palArea*100);
+  // Billboard targets — the "outer limits ALLOWED" are the pallet
+  // dimensions themselves (plus any permitted overhang), not the
+  // per-orientation maximum row/column extent. A mixed-orientation
+  // pattern can legitimately use the full pallet depth even when no
+  // single pure orientation reaches it, so the spread target must be
+  // the pallet's true bounds — every row/column should be able to
+  // reach these edges when its case count allows.
+  const targetW=maxW;
+  const targetL=maxL;
 
-  // Physical case dims per rotation
-  const pw0=cW, pl0=cL;   // 0°:  W along pallet-W, L along pallet-L
-  const pw90=cL, pl90=cW; // 90°: L along pallet-W, W along pallet-L
+  // ── Utilities ────────────────────────────────────────────────────
+  const rot180=pls=>pls.map(p=>({...p,x:rp(pW-p.x-p.w),y:rp(pL-p.y-p.l)}));
 
-  // Max cases in zone per rotation.
-  // IMPORTANT: use the raw (unrounded) case dimension for floor() so that
-  // e.g. 4 cases of 10.375" = 41.5" fits in 48" correctly (floor(48/10.375)=4).
-  const cols0  = Math.max(1, Math.floor((zoneW + EPSILON) / pw0));
-  const rows0  = Math.max(1, Math.floor((zoneL + EPSILON) / pl0));
-  const cols90 = Math.max(1, Math.floor((zoneW + EPSILON) / pw90));
-  const rows90 = Math.max(1, Math.floor((zoneL + EPSILON) / pl90));
-
-  // Tight-packed block dimensions (full precision)
-  const blockW0  = cols0  * pw0;   const blockL0  = rows0  * pl0;
-  const blockW90 = cols90 * pw90;  const blockL90 = rows90 * pl90;
-
-  // ── DUAL-AXIS MASTER FOOTPRINT ───────────────────────────────────────
-  const masterW = Math.max(blockW0, blockW90);
-  const masterL = Math.max(blockL0, blockL90);
-
-  // Master footprint centred on pallet (full precision)
-  const masterX  = (pW - masterW) / 2;
-  const masterY  = (pL - masterL) / 2;
-  const masterX2 = masterX + masterW;
-  const masterY2 = masterY + masterL;
-
-  // ── TIGHT GRID (for Column Stacks and base layers of Interlocks) ─────
-  // All cases touching — no gaps. Block centred on pallet.
-  function buildTight(rotation){
-    const pw = rotation===90 ? pw90 : pw0;
-    const pl = rotation===90 ? pl90 : pl0;
-    const cols = rotation===90 ? cols90 : cols0;
-    const rows = rotation===90 ? rows90 : rows0;
-    const bW = cols * pw;
-    const bL = rows * pl;
-    const sx = (pW - bW) / 2;  // centred, full precision
-    const sy = (pL - bL) / 2;
-    const placed = [];
-    for(let row=0; row<rows; row++){
-      for(let col=0; col<cols; col++){
-        const x = rp(sx + col*pw);
-        const y = rp(sy + row*pl);
-        const c = makeCase(x, y, cW, cL, rotation);
-        const inZone = c.x >= -ohIn-EPSILON && c.y >= -ohIn-EPSILON &&
-                       c.x+c.w <= pW+ohIn+EPSILON && c.y+c.l <= pL+ohIn+EPSILON;
-        if(inZone && noOverlap(c, placed)) placed.push(c);
+  const validate=pls=>{
+    const ohl=ohIn+EPS;
+    for(const p of pls) if(p.x<-ohl||p.y<-ohl||p.x+p.w>pW+ohl||p.y+p.l>pL+ohl) return false;
+    for(let i=0;i<pls.length;i++){const a=pls[i];
+      for(let j=i+1;j<pls.length;j++){const b=pls[j];
+        if(a.x+a.w-EPS>b.x&&b.x+b.w-EPS>a.x&&a.y+a.l-EPS>b.y&&b.y+b.l-EPS>a.y) return false;
       }
     }
-    return { placed, cols, rows, blockW:bW, blockL:bL, startX:sx, startY:sy };
-  }
+    return true;
+  };
 
-  // ── SPREAD GRID (for interlock layers) ──────────────────────────────
-  // Positions computed DIRECTLY from edges (not accumulated steps).
-  // Uses full precision throughout — no rounding of intermediate values.
-  function buildSpread(rotation){
-    const pw = rotation===90 ? pw90 : pw0;
-    const pl = rotation===90 ? pl90 : pl0;
-    const n_cols = rotation===90 ? cols90 : cols0;
-    const n_rows = rotation===90 ? rows90 : rows0;
+  // Billboard spread: n cases of width w, spread to targetSpan
+  // Outer cases pinned to edges, interior gaps distributed evenly
+  const billboardSpread=(n,w,span)=>{
+    if(n<=0) return [];
+    const total=n*w;
+    if(total>=span-EPS) return Array.from({length:n},(_,i)=>rp(i*w));
+    if(n===1) return [rp((span-w)/2)];
+    if(n===2) return [0,rp(span-w)];
+    const gap=(span-total)/(n-1);
+    return Array.from({length:n},(_,i)=>rp(i*(w+gap)));
+  };
 
-    // Direct formula: x[col] = masterX + col * (masterW - pw) / (n_cols - 1)
-    // Guarantees first case left = masterX, last case right = masterX2
-    const xPos = [];
-    if(n_cols === 1){
-      xPos.push(rp(masterX + (masterW - pw) / 2));
-    } else {
-      for(let col=0; col<n_cols; col++){
-        xPos.push(rp(masterX + col * (masterW - pw) / (n_cols - 1)));
+  // Build cases in a row at y, billboard-spread to targetW, centred on pallet
+  const makeRow=(n,w,d,ori,y)=>{
+    if(n<=0||y+d>maxL+EPS) return [];
+    const rowSpan=Math.min(n*w,targetW);
+    const xs=billboardSpread(n,w,rowSpan);
+    const off=rp((pW-rowSpan)/2);
+    return xs.map(x=>({x:rp(x+off),y:rp(y),w,l:d,ori}));
+  };
+
+  // Build a mixed row: nO O-cases then nX X-cases, all centred
+  const makeMixedRow=(nO,nX,y)=>{
+    if(y+Math.max(D0,D9)>maxL+EPS) return [];
+    const w9block=nX*W9;
+    // KEY RULE: spread O-cases across the FULL available O-zone (pW - X-zone)
+    // so the combined block fills pW exactly and outer walls are flush on all sides.
+    // This is what allows "fitting an extra case on the right by spreading the left ones".
+    const w0avail=pW-w9block;        // O-cases spread to fill this width
+    if(w0avail<nO*W0-EPS) return []; // O-cases don't even fit tight
+    if(w9block>maxW+EPS) return [];
+    const xs0=billboardSpread(nO,W0,w0avail); // spread O-cases across their zone
+    const xs9=Array.from({length:nX},(_,i)=>rp(i*W9)); // X-cases tight in their zone
+    // The combined block = w0avail + w9block = pW exactly (no margin needed)
+    const off=rp((pW-(w0avail+w9block))/2); // should be ~0, but handles overhang
+    const pls=[];
+    xs0.forEach(x=>pls.push({x:rp(x+off),y:rp(y),w:W0,l:D0,ori:0}));
+    xs9.forEach(x=>pls.push({x:rp(x+off+w0avail),y:rp(y),w:W9,l:D9,ori:90}));
+    return pls;
+  };
+
+  // Mirror of makeMixedRow: X-cases spread across the left zone,
+  // O-cases packed tight on the right. Used to create alternating-seam
+  // ("checkerboard band") layers where consecutive rows swap which
+  // orientation sits on which side — matching the reference catalog's
+  // 2-row-alternating intra-row mixed patterns.
+  const makeMixedRowSwap=(nO,nX,y)=>{
+    if(y+Math.max(D0,D9)>maxL+EPS) return [];
+    const w0block=nO*W0;
+    const w9avail=pW-w0block;
+    if(w9avail<nX*W9-EPS) return [];
+    if(w0block>maxW+EPS) return [];
+    const xs9=billboardSpread(nX,W9,w9avail);
+    const xs0=Array.from({length:nO},(_,i)=>rp(i*W0));
+    const off=rp((pW-(w9avail+w0block))/2);
+    const pls=[];
+    xs9.forEach(x=>pls.push({x:rp(x+off),y:rp(y),w:W9,l:D9,ori:90}));
+    xs0.forEach(x=>pls.push({x:rp(x+off+w9avail),y:rp(y),w:W0,l:D0,ori:0}));
+    return pls;
+  };
+  const recentre=pls=>{
+    if(!pls.length) return pls;
+    const mnX=Math.min(...pls.map(p=>p.x)),mxX=Math.max(...pls.map(p=>p.x+p.w));
+    const mnY=Math.min(...pls.map(p=>p.y)),mxY=Math.max(...pls.map(p=>p.y+p.l));
+    const dx=rp((pW-(mxX-mnX))/2-mnX),dy=rp((pL-(mxY-mnY))/2-mnY);
+    if(Math.abs(dx)<EPS&&Math.abs(dy)<EPS) return pls;
+    return pls.map(p=>({...p,x:rp(p.x+dx),y:rp(p.y+dy)}));
+  };
+
+  // Global billboard: make every row span [xRef0,xRef1], every col span [yRef0,yRef1]
+  // ── Spread to PALLET TARGET extents (not the pattern's own bbox) ───
+  // Every row's outer case faces should reach [xLo,xHi] = the pallet's
+  // true achievable width (targetW), and every column's outer faces
+  // should reach [yLo,yHi] = targetL. This is what makes the unit load
+  // flush to the outer limits regardless of which row happens to be
+  // widest in THIS particular pattern — the reference is the PALLET's
+  // maximum, not the pattern's own current extent.
+  //
+  // Each pass (row-X, then column-Y) is independently validated and
+  // reverted if it would create an overlap, so a failure in one pass
+  // never discards the whole pattern.
+  const billboardToTargets=(pls)=>{
+    if(pls.length<1) return pls;
+    const TOL=0.02;
+    const xLo=rp((pW-targetW)/2), xHi=rp(xLo+targetW);
+    const yLo=rp((pL-targetL)/2), yHi=rp(yLo+targetL);
+
+    // ROW PASS: spread each row's cases across [xLo,xHi]
+    const rowMap=new Map();
+    pls.forEach(p=>{const k=rp(p.y);if(!rowMap.has(k))rowMap.set(k,[]);rowMap.get(k).push(p);});
+    let stage1=[];
+    rowMap.forEach(row=>{
+      const s=[...row].sort((a,b)=>a.x-b.x);
+      const curMin=Math.min(...s.map(p=>p.x)),curMax=Math.max(...s.map(p=>p.x+p.w));
+      if(Math.abs(curMin-xLo)<TOL&&Math.abs(curMax-xHi)<TOL){s.forEach(p=>stage1.push(p));return;}
+      const totalW=s.reduce((a,p)=>a+p.w,0),n=s.length;
+      if(totalW>=targetW-TOL){
+        const shift=xLo-curMin;
+        s.forEach(p=>stage1.push({...p,x:rp(p.x+shift)}));
+        return;
       }
-    }
-
-    const yPos = [];
-    if(n_rows === 1){
-      yPos.push(rp(masterY + (masterL - pl) / 2));
-    } else {
-      for(let row=0; row<n_rows; row++){
-        yPos.push(rp(masterY + row * (masterL - pl) / (n_rows - 1)));
-      }
-    }
-
-    // Gap values (for description display only — use r2 here is fine)
-    const gapX = n_cols > 1 ? r2((masterW - n_cols*pw) / (n_cols - 1)) : 0;
-    const gapY = n_rows > 1 ? r2((masterL - n_rows*pl) / (n_rows - 1)) : 0;
-
-    const placed = [];
-    for(const y of yPos){
-      for(const x of xPos){
-        const c = makeCase(x, y, cW, cL, rotation);
-        const ok = c.x >= masterX - EPSILON &&
-                   c.y >= masterY - EPSILON &&
-                   c.x + c.w <= masterX2 + EPSILON &&
-                   c.y + c.l <= masterY2 + EPSILON;
-        if(ok && noOverlap(c, placed)) placed.push(c);
-      }
-    }
-    return { placed, gapX, gapY, n_cols, n_rows };
-  }
-
-  // ── Pattern record builder ────────────────────────────────────────────
-  function mkPat(name, desc, plsA, plsB, orientDesc){
-    if(!plsA || !plsA.length) return null;
-    if(plsB && !plsB.length) plsB = null;
-    const TI  = plsA.length;
-    const mxX = Math.max(...plsA.map(p=>p.x+p.w));
-    const mxY = Math.max(...plsA.map(p=>p.y+p.l));
-    const mnX = Math.min(...plsA.map(p=>p.x));
-    const mnY = Math.min(...plsA.map(p=>p.y));
-    // Overhang = (unitLoadFootprint - palletDim) / 2
-    // Positive = cases overhang pallet edge; negative = cases inset inside pallet
-    const unitLoadW = mxX - mnX;  // actual case block width
-    const unitLoadL = mxY - mnY;  // actual case block length
-    const ohW = r2((unitLoadW - pW) / 2);
-    const ohL = r2((unitLoadL - pL) / 2);
-    const orisA = [...new Set(plsA.map(p=>p.ori||0))].sort().join('°, ')+'°';
-    const orisB = plsB
-      ? [...new Set(plsB.map(p=>p.ori||0))].sort().join('°, ')+'°'
-      : orisA;
-    const hasInterlock = !!(plsB);
-    // Cubic efficiency uses cH and HI from outer scope via ST
-    const cHval = (typeof cH !== 'undefined') ? cH : 6;
-    const HIval = 1; // per-layer metric; HI applied at stats level
-    const cubicEff2 = r2(palUtilPct(plsA)); // footprint-based for pattern record
-    const edgeOff2 = (ST.maxOverhang===''||ST.maxOverhang===null) ? 0 : Math.abs(parseFloat(ST.maxOverhang)||0);
-    const edgeOff2in = ST.isMetric ? edgeOff2/25.4 : edgeOff2;
-    const _supp2 = caseSupportPct(plsA, pW, pL, 0, 1, plsB);
-    const supportPct2 = _supp2.avg;
-    const supportMin2 = _supp2.min;
-    const centeringPct2 = weightDistScore(plsA, pW, pL);
-    const seamFracA = continuousSeamFraction(plsA, 'x');
-    const seamFracB = plsB ? continuousSeamFraction(plsB, 'x') : seamFracA;
-    const wdA = weightDistScore(plsA, pW, pL);
-    const wdB = plsB ? weightDistScore(plsB, pW, pL) : wdA;
-    const mxX2=Math.max(...plsA.map(p=>p.x+p.w)),mnX2=Math.min(...plsA.map(p=>p.x));
-    const mxY2=Math.max(...plsA.map(p=>p.y+p.l)),mnY2=Math.min(...plsA.map(p=>p.y));
-    const ohW2=r2(((mxX2-mnX2)-pW)/2), ohL2=r2(((mxY2-mnY2)-pL)/2);
-    const interlockPct = hasInterlock ? r2(overlapRatio(plsA, plsB)*100) : 0;
-    const stability = newStability(hasInterlock, supportPct2, centeringPct2, ohW2, ohL2);
-    return {
-      name, desc, orientDesc,
-      ohUnsafe: ohIn > Math.min(cW,cL)*0.4,
-      placements: plsA,
-      placementsB: plsB || plsA.map(p=>({...p})),
-      count: TI, cubicEff: palUtilPct(plsA), caseSupportPct: supportPct2, minCaseSupport: supportMin2, ohW, ohL, stability,
-      zoneW, zoneL, ohIn, TI,
-      orisA, orisB, interlockPct,
-      seamFracA: r2(seamFracA), seamFracB: r2(seamFracB),
-      wdA, wdB,
-      masterW: dp(masterW), masterL: dp(masterL),
-      connected: true
-    };
-  }
-
-  // ── Row-based pattern helpers (used by Interlock-3 through Interlock-6) ──
-  // All row-based patterns spread cases within each row to the master footprint
-  // edges — identical to how Interlock-1/2 spread entire layers.
-  // This guarantees the outer walls are flush across all layers at every height.
-
-  // Core: given a list of {ori, ncols} row specs, build placements spread to master footprint.
-  // Rows are stacked top-to-bottom; the entire block is centred on the pallet vertically.
-  function buildRowsFromSpec(rowSpecs){
-    // Compute each row's depth (pl dimension of that orientation)
-    const rowsWithH = rowSpecs.map(spec => {
-      const pw = spec.ori === 90 ? pw90 : pw0;
-      const pl = spec.ori === 90 ? pl90 : pl0;
-      return { ...spec, pw, pl };
+      if(n===1){stage1.push({...s[0],x:rp(xLo+(targetW-s[0].w)/2)});return;}
+      const gap=(targetW-totalW)/(n-1);let x=xLo;
+      s.forEach((p,i)=>{stage1.push({...p,x:rp(x)});x=rp(x+p.w+(i<n-1?gap:0));});
     });
+    if(!validate(stage1)) stage1=pls; // revert row pass if it broke validity
 
-    const blockH = rowsWithH.reduce((s,r) => s + r.pl, 0);
-    // Centre the block vertically within the master footprint
-    // (same as buildSpread does for Y — start at masterY, distribute rows)
-    const originY = masterY + (masterL - blockH) / 2;
+    // BAND PASS (Y-direction): treat each row (grouped by y) as a band
+    // with depth = max case length in that band. Distribute the gap
+    // BETWEEN bands (preserving each band's internal x-arrangement from
+    // the row pass) so the overall pattern spans [yLo,yHi].
+    //
+    // This replaces a naive column-grouping approach: after the row pass
+    // gives different rows different x-positions (billboard spreads each
+    // row independently), grouping by x produces mostly single-case
+    // "columns" whose individual centering would collapse all rows
+    // toward the vertical centre and create overlaps. Spreading whole
+    // BANDS instead preserves every row's internal layout exactly.
+    const bandMap=new Map();
+    stage1.forEach(p=>{const k=rp(p.y);if(!bandMap.has(k))bandMap.set(k,[]);bandMap.get(k).push(p);});
+    const bands=[...bandMap.entries()]
+      .sort((a,b)=>a[0]-b[0])
+      .map(([y,cases])=>({y,depth:Math.max(...cases.map(c=>c.l)),cases}));
+    const n=bands.length;
+    const totalDepth=bands.reduce((s,b)=>s+b.depth,0);
+    const curMin=bands[0].y, curMax=bands[n-1].y+bands[n-1].depth;
+    let stage2;
+    if(Math.abs(curMin-yLo)<TOL&&Math.abs(curMax-yHi)<TOL){
+      stage2=stage1; // already flush
+    } else if(totalDepth>=targetL-TOL){
+      // No room to spread — shift whole stack to start at yLo
+      const shift=yLo-curMin;
+      stage2=stage1.map(p=>({...p,y:rp(p.y+shift)}));
+    } else if(n===1){
+      const shift=rp(yLo+(targetL-bands[0].depth)/2-bands[0].y);
+      stage2=stage1.map(p=>({...p,y:rp(p.y+shift)}));
+    } else {
+      const gap=(targetL-totalDepth)/(n-1);
+      const bandShift=new Map();
+      let curY=yLo;
+      bands.forEach((b,i)=>{
+        bandShift.set(b.y, rp(curY-b.y));
+        curY=rp(curY+b.depth+(i<n-1?gap:0));
+      });
+      stage2=stage1.map(p=>({...p,y:rp(p.y+bandShift.get(rp(p.y)))}));
+    }
+    if(!validate(stage2)) stage2=stage1; // revert band pass if it broke validity
 
-    const placed = [];
-    let curY = originY;
-    for(const row of rowsWithH){
-      const { ori, pw, pl, ncols } = row;
-      // Spread cases horizontally flush to master footprint edges (like buildSpread X)
-      const xPositions = [];
-      if(ncols === 1){
-        xPositions.push(rp(masterX + (masterW - pw) / 2));
-      } else {
-        for(let col = 0; col < ncols; col++){
-          xPositions.push(rp(masterX + col * (masterW - pw) / (ncols - 1)));
+    return stage2;
+  };
+
+  // ── Interlock quality check ──────────────────────────────────────
+  // Rule: when interlocked (rot180 of layer B sits on layer A), every case
+  // in layer B must have >= 50% of its footprint area supported by cases in A.
+  // If any case in B has < 50% support, this pattern creates unstable pillars
+  // when interlocked and should be penalised (not hidden, but scored lower).
+  //
+  // Practical shortcut: check the INTERNAL GAPS within any row.
+  // If the gap between adjacent same-row cases > 50% of the SMALLER case's width,
+  // a perpendicular case above could bridge the gap with < 50% support.
+  const maxInternalGap=(pls)=>{
+    const TOL=0.05;
+    const rowMap=new Map();
+    pls.forEach(p=>{const k=rp(p.y);if(!rowMap.has(k))rowMap.set(k,[]);rowMap.get(k).push(p);});
+    let maxGap=0;
+    rowMap.forEach(row=>{
+      const s=[...row].sort((a,b)=>a.x-b.x);
+      for(let i=1;i<s.length;i++) maxGap=Math.max(maxGap, s[i].x-(s[i-1].x+s[i-1].w));
+    });
+    const colMap=new Map();
+    pls.forEach(p=>{const k=rp(p.x);if(!colMap.has(k))colMap.set(k,[]);colMap.get(k).push(p);});
+    colMap.forEach(col=>{
+      const s=[...col].sort((a,b)=>a.y-b.y);
+      for(let i=1;i<s.length;i++) maxGap=Math.max(maxGap, s[i].y-(s[i-1].y+s[i-1].l));
+    });
+    return maxGap;
+  };
+  // The threshold: max internal gap must be < 50% of the smallest case dimension
+  const smallestDim=Math.min(W0,D0,W9,D9);
+  const MAX_GAP_OK=smallestDim*0.5; // 50% of smallest case dimension
+
+  const scorePattern=pls=>{
+    const n=pls.length;
+    const area=pls.reduce((s,p)=>s+p.w*p.l,0);
+    let conn=0;
+    pls.forEach(a=>{if(pls.some(b=>b!==a&&((Math.abs(a.x+a.w-b.x)<0.2||Math.abs(b.x+b.w-a.x)<0.2)&&(a.y<b.y+b.l-EPS&&b.y<a.y+a.l-EPS))||((Math.abs(a.y+a.l-b.y)<0.2||Math.abs(b.y+b.l-a.y)<0.2)&&(a.x<b.x+b.w-EPS&&b.x<a.x+a.w-EPS))))conn++;});
+    const mnX=Math.min(...pls.map(p=>p.x)),mxX=Math.max(...pls.map(p=>p.x+p.w));
+    const mnY=Math.min(...pls.map(p=>p.y)),mxY=Math.max(...pls.map(p=>p.y+p.l));
+    const bbox=(mxX-mnX)*(mxY-mnY);
+    const gap=maxInternalGap(pls);
+    // Penalise patterns with large internal gaps (poor interlock support)
+    const gapPenalty=gap>MAX_GAP_OK?500*(gap/smallestDim):0;
+    return 1000*n+150*(area/palArea)+200*(conn/n)-200*((bbox-area)/palArea)-gapPenalty;
+  };
+
+  // ── Pattern registry ─────────────────────────────────────────────
+  const PATS=[];
+  const seenFP=new Map();
+  const R=100;
+
+  const fpOf=pls=>[...pls].sort((a,b)=>a.y!==b.y?a.y-b.y:a.x-b.x)
+    .map(p=>Math.round(p.x*R)+'_'+Math.round(p.y*R)+'_'+Math.round(p.w*R)+'_'+Math.round(p.l*R)+'_'+p.ori).join('|');
+
+  const addPat=(name,desc,rawPls,skipBillboard)=>{
+    if(!rawPls||rawPls.length<1) return;
+    const ohl=ohIn+EPS;
+    let pls=rawPls.filter(p=>p.x>=-ohl&&p.y>=-ohl&&p.x+p.w<=pW+ohl&&p.y+p.l<=pL+ohl);
+    if(pls.length<1||!validate(pls)) return;
+    pls=recentre(pls);
+    if(!skipBillboard){
+      // Best-effort billboard: pls is already valid here. If spreading
+      // creates overlaps (common for multi-row-type patterns where rows
+      // have different case widths), fall back to the pre-billboard
+      // layout rather than discarding the whole pattern.
+      const spread=recentre(billboardToTargets(pls));
+      if(validate(spread)) pls=spread;
+    }
+    if(!validate(pls)) return;
+    const TI=pls.length; if(TI<1) return;
+    // Fingerprint — catches exact duplicates and rot180 equivalents
+    const k=fpOf(pls);
+    const kr=fpOf(rot180(pls));
+    if(seenFP.has(k)||seenFP.has(kr)) return;
+    seenFP.set(k,true);
+    // Interlock: rot180, realigned to same bbox
+    const rawB=rot180(pls);
+    const mnXA=Math.min(...pls.map(p=>p.x)),mnYA=Math.min(...pls.map(p=>p.y));
+    const mnXB=Math.min(...rawB.map(p=>p.x)),mnYB=Math.min(...rawB.map(p=>p.y));
+    const plsB=rawB.map(p=>({...p,x:rp(p.x+mnXA-mnXB),y:rp(p.y+mnYA-mnYB)}));
+    const ce=r2(pls.reduce((s,p)=>s+p.w*p.l,0)/palArea*100);
+    const mnX=Math.min(...pls.map(p=>p.x)),mxX=Math.max(...pls.map(p=>p.x+p.w));
+    const mnY=Math.min(...pls.map(p=>p.y)),mxY=Math.max(...pls.map(p=>p.y+p.l));
+    const ohW=r2(((mxX-mnX)-pW)/2),ohL=r2(((mxY-mnY)-pL)/2);
+    const supp=caseSupportPct(pls,pW,pL,0,1,plsB);
+    const cen=weightDistScore(pls,pW,pL);
+    const stab=newStability(true,supp.avg,cen,ohW,ohL);
+    const il=r2(overlapRatio(pls,plsB)*100);
+    PATS.push({
+      name,desc:desc||name,orientDesc:'',
+      placements:pls,placementsB:plsB,
+      count:TI,TI,TI_B:TI,ohW,ohL,cubicEff:ce,palUtilPct:ce,
+      caseSupportPct:supp.avg,minCaseSupport:supp.min,stability:stab,interlockPct:il,
+      orisA:'',orisB:'',zoneW:pW,zoneL:pL,ohIn,
+      wdA:cen,wdB:cen,masterW:r2(pW),masterL:r2(pL),_score:scorePattern(pls),
+    });
+  };
+
+  // ════════════════════════════════════════════════════════════════
+  // EXHAUSTIVE ROW-SEQUENCE SEARCH
+  // Enumerate every combination of row types that fits pL.
+  // Row types: O-rows (depth D0), X-rows (depth D9), mixed rows (depth max(D0,D9))
+  //
+  // IMPORTANT: for small case footprints, mC0/mC9 can be large (8-12+),
+  // which would create 100+ row types (every n from 1..mC × every mixed
+  // nO/nX combo) and explode the DFS branching factor — the search would
+  // hit its node cap after only 2-3 rows deep, far short of the 8-10 rows
+  // needed to fill the pallet. This produced very FEW patterns for small
+  // cases, the opposite of what's needed (small cases need the MOST
+  // row-orientation variety, per the reference catalog).
+  //
+  // Fix: limit each orientation to its 2 most useful counts (full row,
+  // and one-less-than-full — which billboard-spreads into a different
+  // look), plus a handful of strategic mixed-row splits. This keeps the
+  // branching factor near ~8-10 regardless of case size, so the DFS can
+  // reach full pallet depth and register many distinct row-by-row
+  // orientation sequences — exactly the "column stack, row by row turns"
+  // variety shown in the reference image.
+  // ════════════════════════════════════════════════════════════════
+
+  const ROW_TYPES=[];  // {depth, cases_count, ori, build_fn(y)}
+
+  if(can0){
+    [mC0, mC0-1].forEach(n=>{
+      if(n>=1){ROW_TYPES.push({depth:D0,n,ori:0,build:(y)=>makeRow(n,W0,D0,0,y)});}
+    });
+  }
+  if(can9){
+    [mC9, mC9-1].forEach(n=>{
+      if(n>=1){ROW_TYPES.push({depth:D9,n,ori:9,build:(y)=>makeRow(n,W9,D9,90,y)});}
+    });
+  }
+  // Mixed rows: a focused set of nX/nO splits (not the full cross-product)
+  // Try nX = 1..min(mC9-1, 6) and the matching nO that fills the rest.
+  if(can0&&can9&&Math.abs(D0-D9)>EPS){
+    const mixDep=Math.max(D0,D9);
+    const seenMix=new Set();
+    const maxNX=Math.max(1,Math.min(mC9-1,6));
+    for(let nX=1;nX<=maxNX;nX++){
+      const nO=Math.floor((maxW-nX*W9+EPS)/W0);
+      if(nO>=1&&nO<=mC0-1){
+        const key=nO+'_'+nX;
+        if(!seenMix.has(key)){
+          seenMix.add(key);
+          ROW_TYPES.push({depth:mixDep,n:nO+nX,ori:'mix',build:(y)=>makeMixedRow(nO,nX,y)});
         }
       }
-      for(const x of xPositions){
-        const y = rp(curY);
-        const c = makeCase(x, y, cW, cL, ori);
-        const inZone = c.x >= -ohIn-EPSILON && c.y >= -ohIn-EPSILON &&
-                       c.x+c.w <= pW+ohIn+EPSILON && c.y+c.l <= pL+ohIn+EPSILON;
-        if(inZone && noOverlap(c, placed)) placed.push(c);
+    }
+    // Also try the symmetric direction: nO=1..min(mC0-1,6), matching nX
+    const maxNO=Math.max(1,Math.min(mC0-1,6));
+    for(let nO=1;nO<=maxNO;nO++){
+      const nX=Math.floor((maxW-nO*W0+EPS)/W9);
+      if(nX>=1&&nX<=mC9-1){
+        const key=nO+'_'+nX;
+        if(!seenMix.has(key)){
+          seenMix.add(key);
+          ROW_TYPES.push({depth:mixDep,n:nO+nX,ori:'mix',build:(y)=>makeMixedRow(nO,nX,y)});
+        }
       }
-      curY = rp(curY + pl);
-    }
-    return placed;
-  }
-
-  // Plan rows for alternating-row patterns (period-2), return row specs
-  function planRowAlt(startOri){
-    const specs = [];
-    let curH = 0, rowIdx = 0;
-    while(true){
-      const ori = (rowIdx % 2 === 0) ? startOri : (startOri === 0 ? 90 : 0);
-      const pw  = ori === 90 ? pw90 : pw0;
-      const pl  = ori === 90 ? pl90 : pl0;
-      const ncols = Math.max(0, Math.floor((masterW + EPSILON) / pw));
-      if(ncols === 0) break;
-      if(curH + pl > masterL + EPSILON) break;
-      specs.push({ ori, ncols });
-      curH = rp(curH + pl);
-      rowIdx++;
-    }
-    return specs;
-  }
-
-  // Plan rows for prefix+fill patterns, return row specs
-  function planRowSchedule(prefixOris, fillOri){
-    const specs = [];
-    let curH = 0, rowIdx = 0;
-    while(true){
-      const ori = rowIdx < prefixOris.length ? prefixOris[rowIdx] : fillOri;
-      const pw  = ori === 90 ? pw90 : pw0;
-      const pl  = ori === 90 ? pl90 : pl0;
-      const ncols = Math.max(0, Math.floor((masterW + EPSILON) / pw));
-      if(ncols === 0) break;
-      if(curH + pl > masterL + EPSILON) break;
-      specs.push({ ori, ncols });
-      curH = rp(curH + pl);
-      rowIdx++;
-    }
-    return specs;
-  }
-
-  // Build a row-alternating layer spread to master footprint
-  function buildRowAlt(startOri){
-    return buildRowsFromSpec(planRowAlt(startOri));
-  }
-
-  // Build a prefix+fill layer spread to master footprint
-  function buildRowSchedule(prefixOris, fillOri){
-    return buildRowsFromSpec(planRowSchedule(prefixOris, fillOri));
-  }
-
-  // Rotate a placement array 180° around the pallet centre
-  function rot180(pls){ return pls.map(c=>({...c, x:rp(pW-c.x-c.w), y:rp(pL-c.y-c.l)})); }
-
-  const PATS = [];
-
-  // ══════════════════════════════════════════════════════════════════════
-  // PATTERN 1 — Column Stack (L∥Pallet-L)
-  // 0° every layer. Cases packed tight (touching). Block centred on pallet.
-  // ══════════════════════════════════════════════════════════════════════
-  const g0 = buildTight(0);
-  if(g0.placed.length){
-    const p = mkPat(
-      'Column Stack-1',
-      `Case LENGTH (${dp(cL)}${u()}) parallel to pallet LENGTH (${dp(pL)}${u()}). `+
-      `${g0.cols}\xd7${g0.rows} grid \u2014 ${g0.placed.length} cases/layer. `+
-      `All cases touching. Block centred. All layers identical. `+
-      `Margins: W\xb1${dp(g0.startX)}${u()} L\xb1${dp(g0.startY)}${u()}.`,
-      g0.placed, g0.placed.map(p=>({...p})),
-      `0\xb0 \u2014 ${g0.cols} cols \xd7 ${g0.rows} rows, packed tight, centred`
-    );
-    if(p) PATS.push(p);
-  }
-
-  // ══════════════════════════════════════════════════════════════════════
-  // PATTERN 2 — Column Stack (W∥Pallet-L)
-  // 90° every layer. Cases packed tight (touching). Block centred on pallet.
-  // ══════════════════════════════════════════════════════════════════════
-  const g90 = buildTight(90);
-  if(g90.placed.length){
-    const p = mkPat(
-      'Column Stack-2',
-      `Case WIDTH (${dp(cW)}${u()}) parallel to pallet LENGTH (${dp(pL)}${u()}). `+
-      `${g90.cols}\xd7${g90.rows} grid \u2014 ${g90.placed.length} cases/layer. `+
-      `All cases touching. Block centred. All layers identical. `+
-      `Margins: W\xb1${dp(g90.startX)}${u()} L\xb1${dp(g90.startY)}${u()}.`,
-      g90.placed, g90.placed.map(p=>({...p})),
-      `90\xb0 \u2014 ${g90.cols} cols \xd7 ${g90.rows} rows, packed tight, centred`
-    );
-    if(p) PATS.push(p);
-  }
-
-  // ══════════════════════════════════════════════════════════════════════
-  // PATTERN 3 — Interlock-1
-  // Layer 1 (odd layers 1,3,5…): 0° — spread to master footprint
-  //   Same orientation as Column Stack #1, but spread to master edges.
-  //   If blockW_0° = masterW already: no gap needed, stays touching.
-  //   If blockW_0° < masterW: cases spread out to reach master edges.
-  // Layer 2 (even layers 2,4,6…): 90° — spread to master footprint
-  // Both layers share the SAME outer boundary (masterW × masterL).
-  // ══════════════════════════════════════════════════════════════════════
-  {
-    const sp0_il1  = buildSpread(0);   // 0°  spread to master footprint
-    const sp90_il1 = buildSpread(90);  // 90° spread to master footprint
-    if(sp0_il1.placed.length && sp90_il1.placed.length){
-      const g0d  = `gap W:${dp(sp0_il1.gapX)}${u()} L:${dp(sp0_il1.gapY)}${u()}`;
-      const g90d = `gap W:${dp(sp90_il1.gapX)}${u()} L:${dp(sp90_il1.gapY)}${u()}`;
-      const masterDesc = `Master ${dp(masterW)}\xd7${dp(masterL)}${u()} `+
-        `(W from ${blockW0>=blockW90?'0\xb0':'90\xb0'}, L from ${blockL0>=blockL90?'0\xb0':'90\xb0'})`;
-      const p = mkPat(
-        'Interlock-1',
-        `Layer 1 = 0\xb0 (${sp0_il1.placed.length} cases, ${g0d}). `+
-        `Alternates 0\xb0/90\xb0/0\xb0\u2026 Each layer spread to ${masterDesc}. `+
-        `90\xb0 layers: ${sp90_il1.n_cols}\xd7${sp90_il1.n_rows} = ${sp90_il1.placed.length} cases, ${g90d}. `+
-        `Outer walls uniform at all layers.`,
-        sp0_il1.placed,   // Layer A: 0°, spread to master (odd layers 1,3,5…)
-        sp90_il1.placed,  // Layer B: 90°, spread to master (even layers 2,4,6…)
-        `A:0\xb0 ${sp0_il1.n_cols}\xd7${sp0_il1.n_rows} ${g0d} | B:90\xb0 ${sp90_il1.n_cols}\xd7${sp90_il1.n_rows} ${g90d} | ${masterDesc}`
-      );
-      if(p) PATS.push(p);
     }
   }
 
-  // ══════════════════════════════════════════════════════════════════════
-  // PATTERN 4 — Interlock-2
-  // Layer 1 (odd layers 1,3,5…): 90° — spread to master footprint
-  //   Same orientation as Column Stack #2, spread to master edges.
-  // Layer 2 (even layers 2,4,6…): 0° — spread to master footprint
-  // Both layers share the SAME outer boundary (masterW × masterL).
-  // ══════════════════════════════════════════════════════════════════════
-  {
-    const sp90_il2 = buildSpread(90);  // 90° spread to master footprint
-    const sp0_il2  = buildSpread(0);   // 0°  spread to master footprint
-    if(sp90_il2.placed.length && sp0_il2.placed.length){
-      const g90d = `gap W:${dp(sp90_il2.gapX)}${u()} L:${dp(sp90_il2.gapY)}${u()}`;
-      const g0d  = `gap W:${dp(sp0_il2.gapX)}${u()} L:${dp(sp0_il2.gapY)}${u()}`;
-      const masterDesc = `Master ${dp(masterW)}\xd7${dp(masterL)}${u()} `+
-        `(W from ${blockW0>=blockW90?'0\xb0':'90\xb0'}, L from ${blockL0>=blockL90?'0\xb0':'90\xb0'})`;
-      const p = mkPat(
-        'Interlock-2',
-        `Layer 1 = 90\xb0 (${sp90_il2.placed.length} cases, ${g90d}). `+
-        `Alternates 90\xb0/0\xb0/90\xb0\u2026 Each layer spread to ${masterDesc}. `+
-        `0\xb0 layers: ${sp0_il2.n_cols}\xd7${sp0_il2.n_rows} = ${sp0_il2.placed.length} cases, ${g0d}. `+
-        `Outer walls uniform at all layers.`,
-        sp90_il2.placed,  // Layer A: 90°, spread to master (odd layers 1,3,5…)
-        sp0_il2.placed,   // Layer B:  0°, spread to master (even layers 2,4,6…)
-        `A:90\xb0 ${sp90_il2.n_cols}\xd7${sp90_il2.n_rows} ${g90d} | B:0\xb0 ${sp0_il2.n_cols}\xd7${sp0_il2.n_rows} ${g0d} | ${masterDesc}`
-      );
-      if(p) PATS.push(p);
-    }
-  }
+  // Track which row-type-sequence signatures we've already registered
+  const seenRowSig=new Set();
+  const MAX_PATS=400;     // cap on registered patterns
+  const NODE_CAP=30000;   // cap on DFS nodes visited (independent of registration)
+  let nodeVisits=0;
 
-  // ══════════════════════════════════════════════════════════════════════
-  // PATTERN 5 — Interlock-3
-  // Row-alternating: rows of 0° and 90° cases alternate across the pallet length.
-  //   Row 1 (0°): fit as many cW×cL cases (0°) across pallet width.
-  //   Row 2 (90°): fit as many cL×cW cases (90°) across pallet width.
-  //   Alternate until no more rows fit. Entire layer centred on pallet.
-  // Layer A: starts with row of 0° cases.
-  // Layer B: same layout rotated 180° around pallet centre.
-  // ══════════════════════════════════════════════════════════════════════
-  {
-    const plsA_il3 = buildRowAlt(0);
-    const plsB_il3 = rot180(buildRowAlt(0));
-
-    if(plsA_il3.length && plsB_il3.length){
-      // Count rows and describe
-      const rowsA = [];
-      let ri=0, cy=Math.min(...plsA_il3.map(c=>c.y));
-      while(true){
-        const ori = ri%2===0 ? 0 : 90;
-        const inRow = plsA_il3.filter(c=>Math.abs(c.y-cy)<EPSILON);
-        if(!inRow.length) break;
-        rowsA.push({ori, n:inRow.length});
-        cy = rp(cy + inRow[0].l);
-        ri++;
-        if(ri > 40) break;  // safety
+  // DFS over row sequences
+  function buildLayer(yRemaining, rowsSoFar, totalN, plsSoFar){
+    nodeVisits++;
+    if(nodeVisits>NODE_CAP) return;
+    if(PATS.length>MAX_PATS) return;
+    // Register this layer if it has cases
+    if(totalN>0 && plsSoFar.length>0){
+      const sig=rowsSoFar.map(r=>r.ori+':'+r.n).join('|');
+      if(!seenRowSig.has(sig)){
+        seenRowSig.add(sig);
+        const parts=[];let i=0;
+        while(i<rowsSoFar.length){
+          const rt=rowsSoFar[i];
+          const oriLabel=rt.ori===0?'O':rt.ori===9?'X':rt.ori==='mix'?'MX':'?';
+          let run=1;
+          while(i+run<rowsSoFar.length&&rowsSoFar[i+run].ori===rt.ori&&rowsSoFar[i+run].n===rt.n) run++;
+          parts.push(run>1?run+'×'+rt.n+oriLabel:rt.n+oriLabel);
+          i+=run;
+        }
+        addPat(parts.join('+'), `Layer: ${parts.join('+')}`, [...plsSoFar]);
       }
-      const descA = rowsA.map((r,i)=>`Row${i+1}:${r.n}×${r.ori}°`).join(' ');
-      const p = mkPat(
-        'Interlock-3',
-        `Row-alternating pattern. Layer A: alternate rows of 0° and 90° cases across pallet width (${descA}). `+
-        `Layer B: same pattern rotated 180°. Layers alternate A/B/A/B… All rows centred.`,
-        plsA_il3,
-        plsB_il3,
-        `A: rows 0°/90°/0°… | B: A rotated 180°`
-      );
-      if(p) PATS.push(p);
+    }
+    if(yRemaining<Math.min(can0?D0:D9,can9?D9:D0)-EPS) return;
+    // Sort row types: try highest case count first (maximise TI early)
+    const ordered=[...ROW_TYPES].sort((a,b)=>b.n-a.n);
+    for(const rt of ordered){
+      if(rt.depth>yRemaining+EPS) continue;
+      if(nodeVisits>NODE_CAP) break;
+      if(PATS.length>MAX_PATS) break;
+      const rowY=rp(plsSoFar.length>0?plsSoFar.reduce((m,p)=>Math.max(m,p.y+p.l),0):0);
+      const rowCases=rt.build(rowY);
+      if(!rowCases.length) continue;
+      rowsSoFar.push(rt);
+      plsSoFar.push(...rowCases);
+      buildLayer(yRemaining-rt.depth, rowsSoFar, totalN+rt.n, plsSoFar);
+      rowsSoFar.pop();
+      plsSoFar.splice(plsSoFar.length-rowCases.length, rowCases.length);
     }
   }
 
-  // ══════════════════════════════════════════════════════════════════════
-  // PATTERN 6 — Interlock-4
-  // Same as Interlock-3 but first row starts with 90° instead of 0°.
-  //   Row 1 (90°): fit as many cL×cW cases (90°) across pallet width in a row.
-  //   Row 2  (0°): fit as many cW×cL cases (0°)  across pallet width in a row.
-  //   Alternate until no more rows fit within zone.
-  // Layer A: rows start with 90°.
-  // Layer B: same layout rotated 180° around pallet centre.
-  // Layers alternate A/B/A/B...
-  // ══════════════════════════════════════════════════════════════════════
-  {
-    // Re-use buildRowAlt defined in Interlock-3 block above.
-    // Layer A: rows start with 90°
-    const plsA_il4 = buildRowAlt(90);
+  buildLayer(maxL, [], 0, []);
 
-    // Layer B: same structure rotated 180° around pallet centre
-    const plsB_il4 = rot180(buildRowAlt(90));
+  // ════════════════════════════════════════════════════════════════
+  // SECTION: BRICK BOND (special — not a row-sequence pattern)
+  // ════════════════════════════════════════════════════════════════
+  [[W0,D0,mC0,mR0,0],[W9,D9,mC9,mR9,9]].forEach(([w,d,nc,nr,ori])=>{
+    if(nc<2||nr<2) return;
+    const palOff=rp((pW-targetW)/2);
+    const p=[];
+    for(let r=0;r<nr;r++){
+      const y=rp(r*d); if(y+d>maxL+EPS) break;
+      const n=r%2===0?nc:nc-1;
+      if(n<1) continue;
+      billboardSpread(n,w,targetW).forEach(x=>{
+        const px=rp(x+palOff);
+        if(px>=-ohIn-EPS&&px+w<=pW+ohIn+EPS) p.push({x:px,y,w,l:d,ori:ori===9?90:0});
+      });
+    }
+    const f=p.filter(p=>p.x>=-ohIn-EPS&&p.y>=-ohIn-EPS&&p.x+p.w<=pW+ohIn+EPS&&p.y+p.l<=pL+ohIn+EPS);
+    if(f.length>=4) addPat(`Brick Bond ${ori===9?'X':'O'}`,`Brick bond — alternating ${nc}/${nc-1} cases per row, billboard flush.`,f,true);
+  });
 
-    if(plsA_il4.length && plsB_il4.length){
-      const rowsA4 = [];
-      let ri=0, cy=Math.min(...plsA_il4.map(c=>c.y));
-      while(true){
-        const inRow = plsA_il4.filter(c=>Math.abs(c.y-cy)<EPSILON);
-        if(!inRow.length) break;
-        const ori = ri%2===0 ? 90 : 0;
-        rowsA4.push({ori, n:inRow.length});
-        cy = rp(cy + inRow[0].l);
-        ri++;
-        if(ri > 40) break;
+  // ════════════════════════════════════════════════════════════════
+  // SECTION: PINWHEEL
+  // ════════════════════════════════════════════════════════════════
+  if(can0&&can9){
+    const midW=Math.max(0,Math.floor((maxW-2*W9+EPS)/W0));
+    if(midW>=1&&mR0>=3){
+      const p=[],off=rp((pW-targetW)/2);
+      billboardSpread(mC9,W9,targetW).forEach(x=>p.push({x:rp(x+off),y:0,w:W9,l:D9,ori:90}));
+      let y=D9;
+      for(let r=0;r<mR0-2;r++){
+        if(y+D0>pL-D9+EPS) break;
+        p.push({x:rp(off),y,w:W9,l:D0,ori:90});
+        for(let c=0;c<midW;c++) p.push({x:rp(off+W9+c*W0),y,w:W0,l:D0,ori:0});
+        p.push({x:rp(off+W9+midW*W0),y,w:W9,l:D0,ori:90});
+        y=rp(y+D0);
       }
-      const descA4 = rowsA4.map((r,i)=>`Row${i+1}:${r.n}×${r.ori}°`).join(' ');
-      const p = mkPat(
-        'Interlock-4',
-        `Row-alternating pattern. Layer A: alternate rows of 90° and 0° cases across pallet width (${descA4}). `+
-        `Layer B: same pattern rotated 180°. Layers alternate A/B/A/B… All rows centred.`,
-        plsA_il4,
-        plsB_il4,
-        `A: rows 90°/0°/90°… | B: A rotated 180°`
-      );
-      if(p) PATS.push(p);
+      const botY=rp(pL-D9);
+      if(botY>D9) billboardSpread(mC9,W9,targetW).forEach(x=>p.push({x:rp(x+off),y:botY,w:W9,l:D9,ori:90}));
+      const f=p.filter(p=>p.x>=-ohIn-EPS&&p.y>=-ohIn-EPS&&p.x+p.w<=pW+ohIn+EPS&&p.y+p.l<=pL+ohIn+EPS);
+      if(f.length&&validate(f)) addPat('Pinwheel','X border rows + X side columns + O interior.',f,true);
     }
   }
 
-  // ══════════════════════════════════════════════════════════════════════
-  // PATTERN 7 — Interlock-5
-  // Prefix pattern: Row 1 = 0°, Row 2 = 0°, then ALL remaining rows = 90°.
-  // Layer A: [0°, 0°, 90°, 90°, 90°…] top to bottom, centred.
-  // Layer B: same layout rotated 180° around pallet centre.
-  // Layers alternate A/B/A/B...
-  // ══════════════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════════
+  // ORIENTATION-BUCKET ENGINE
+  // Generates patterns for 11 orientation ratio buckets (100/0 → 0/100)
+  // Each bucket × 5 placement strategies = 55 candidate generators.
+  // Evaluates: case count, utilization, wall-flush, CoG, interlock.
+  //
+  // Orientation buckets: ratio of X(90°) to O(0°) cases
+  //   0/100=pureO  10/90  20/80  30/70  40/60  50/50
+  //   60/40  70/30  80/20  90/10  100/0=pureX
+  //
+  // Placement strategies per bucket:
+  //   CLUSTERED    — all X-cases grouped together in one zone
+  //   DISTRIBUTED  — X-cases spread evenly across all rows
+  //   PERIMETER    — X-cases on outer rows/columns (wall-flush)
+  //   CORE         — X-cases in the centre rows/columns
+  //   CORNER       — X-cases concentrated in corner quadrants
+  // ════════════════════════════════════════════════════════════════
+  if(can0&&can9){
+    // Total max cases for the pure-max orientation
+    const maxTotal=Math.max(mC0*mR0, mC9*mR9);
+
+    // ── Core builder: given a grid of (row, col) → ori assignments, build pls ──
+    // nRows and nCols are determined per bucket to fit pallet.
+    // We work on a rectangular grid and assign ori per cell.
+    const buildGrid=(nR0,nC0,nR9,nC9,assignFn)=>{
+      // assignFn(r, c, totalRows, totalCols, nR0, nC0, nR9, nC9) → 0 or 9
+      // Builds a layer where rows alternate between O-band-height and X-band-height
+      // Strategy: use the mixed-row approach — assign each row a dominant orientation
+      // then fill with that orientation's case dimensions.
+      // For grid-style: use uniform row height = D0 for 0° rows, D9 for 90° rows.
+      // Group rows into bands: rows 0..nR9-1 = X-rows, nR9..nR9+nR0-1 = O-rows
+      // Then apply the assignment function to determine ORDER of row types.
+      const pls=[];
+      // Determine row sequence from assignment
+      const totalRows=nR0+nR9;
+      const rowTypes=Array.from({length:totalRows},(_,r)=>assignFn(r,0,totalRows,0,nR0,0,nR9,0));
+      let y=0;
+      for(let r=0;r<totalRows;r++){
+        const isX=rowTypes[r]===9;
+        const w=isX?W9:W0, d=isX?D9:D0, n=isX?nC9:nC0, ori=isX?90:0;
+        if(y+d>maxL+EPS) break;
+        makeRow(n,w,d,ori,y).forEach(c=>pls.push(c));
+        y=rp(y+d);
+      }
+      return pls.filter(p=>p.x>=-ohIn-EPS&&p.y>=-ohIn-EPS&&p.x+p.w<=pW+ohIn+EPS&&p.y+p.l<=pL+ohIn+EPS);
+    };
+
+    // ── Compute nR9/nR0 for a given X-ratio target ────────────────────
+    // Given targetRatioX (0.0-1.0), find nR9 X-rows and nR0 O-rows that:
+    //   1. Fit within pallet length
+    //   2. Achieve approximately targetRatioX case fraction
+    //   3. Maximize total case count (fill as much of the pallet depth
+    //      as possible — critical for small case footprints where many
+    //      rows fit and leaving depth unused would waste most of the
+    //      pallet and starve pattern variety)
+    const getBucketRowCounts=(targetRatioX)=>{
+      if(targetRatioX<=0) return {nR9:0,nR0:mR0};
+      if(targetRatioX>=1) return {nR9:mR9,nR0:0};
+      const maxR9=Math.floor((maxL+EPS)/D9);
+      const maxR0=Math.floor((maxL+EPS)/D0);
+      let best={nR9:0,nR0:0,total:0,err:99,usedL:0};
+      for(let r9=0;r9<=maxR9;r9++){
+        const maxR0ForR9=Math.floor((maxL-r9*D9+EPS)/D0);
+        if(maxR0ForR9<0) continue;
+        for(let r0=0;r0<=maxR0ForR9;r0++){
+          if(r9===0&&r0===0) continue;
+          const total=r9*mC9+r0*mC0;
+          if(total===0) continue;
+          const actualRatio=(r9*mC9)/total;
+          const err=Math.abs(actualRatio-targetRatioX);
+          const usedL=r9*D9+r0*D0;
+          // Prefer lower ratio-error; among near-ties prefer higher total
+          // (fills more of the pallet); among ties in both prefer higher usedL
+          if(err<best.err-1e-9 ||
+            (Math.abs(err-best.err)<1e-9 && total>best.total) ||
+            (Math.abs(err-best.err)<1e-9 && total===best.total && usedL>best.usedL)){
+            best={nR9:r9,nR0:r0,total,err,usedL};
+          }
+        }
+      }
+      return {nR9:best.nR9,nR0:best.nR0};
+    };
+
+    // ── 5 placement strategy functions ────────────────────────────────
+    // Each returns a row-ordering array (9=X-row, 0=O-row)
+
+    const stratClustered=(nR9,nR0)=>{
+      // All X-rows grouped together at top, O-rows below
+      return [...Array(nR9).fill(9),...Array(nR0).fill(0)];
+    };
+    const stratClusteredBot=(nR9,nR0)=>{
+      // All X-rows at bottom
+      return [...Array(nR0).fill(0),...Array(nR9).fill(9)];
+    };
+    const stratDistributed=(nR9,nR0)=>{
+      // Evenly interleave X-rows among O-rows
+      const total=nR9+nR0; const rows=[];
+      let x9=0,x0=0;
+      for(let i=0;i<total;i++){
+        const useX=x9/Math.max(nR9,1)<=x0/Math.max(nR0,1);
+        if(useX&&x9<nR9){rows.push(9);x9++;}
+        else if(x0<nR0){rows.push(0);x0++;}
+        else{rows.push(9);x9++;}
+      }
+      return rows;
+    };
+    const stratPerimeter=(nR9,nR0)=>{
+      // X-rows on outside (top+bottom), O-rows in middle
+      const rows=[...Array(nR9+nR0).fill(0)];
+      const half=Math.ceil(nR9/2);
+      for(let i=0;i<half&&i<nR9+nR0;i++) rows[i]=9;
+      for(let i=0;i<nR9-half&&i<nR9+nR0;i++) rows[nR9+nR0-1-i]=9;
+      return rows;
+    };
+    const stratCore=(nR9,nR0)=>{
+      // X-rows in middle, O-rows on outside
+      const rows=[...Array(nR9+nR0).fill(0)];
+      const mid=Math.floor((nR9+nR0)/2);
+      const half=Math.ceil(nR9/2);
+      for(let i=0;i<nR9;i++) rows[mid-half+i]=9;
+      return rows;
+    };
+    const stratAlternating=(nR9,nR0)=>{
+      // Strict X/O alternation starting with X
+      const total=nR9+nR0; const rows=[];
+      for(let i=0;i<total;i++) rows.push(i%2===0&&nR9>0?9:0);
+      // Adjust to match exact counts
+      const got9=rows.filter(r=>r===9).length;
+      if(got9>nR9) for(let i=rows.length-1;i>=0&&rows.filter(r=>r===9).length>nR9;i--) if(rows[i]===9) rows[i]=0;
+      if(got9<nR9) for(let i=0;i<rows.length&&rows.filter(r=>r===9).length<nR9;i++) if(rows[i]===0) rows[i]=9;
+      return rows;
+    };
+
+    // ── Column-split bucket variants ───────────────────────────────────
+    // For each bucket, also generate a column-split version:
+    // nC9 columns of X on left, nC0 columns of O on right (or vice versa)
+    const buildColBucket=(nR9,nR0,colStrategy)=>{
+      // colStrategy: 'XLeft','XRight','XCenter','XEdge','alternate'
+      const pls=[];
+      const nC0b=Math.floor((maxW+EPS)/W0); // max O-cols in pallet width
+      const nC9b=Math.floor((maxW+EPS)/W9); // max X-cols in pallet width
+
+      if(colStrategy==='XLeft'){
+        // Determine split: nXcols + nOcols to fill width
+        const nXcols=Math.max(1,Math.round(nC9b*(nR9/(nR9+nR0||1))));
+        const nOcols=Math.floor((maxW-nXcols*W9+EPS)/W0);
+        if(nOcols<1) return [];
+        const xsX=billboardSpread(nXcols,W9,nXcols*W9);
+        const xsO=billboardSpread(nOcols,W0,nOcols*W0);
+        const off=rp((pW-nXcols*W9-nOcols*W0)/2);
+        for(let r=0;r<Math.max(mR9,mR0);r++){
+          const yX=rp(r*D9),yO=rp(r*D0);
+          if(yX+D9<=maxL+EPS) xsX.forEach(x=>pls.push({x:rp(x+off),y:yX,w:W9,l:D9,ori:90}));
+          if(yO+D0<=maxL+EPS) xsO.forEach(x=>pls.push({x:rp(x+off+nXcols*W9),y:yO,w:W0,l:D0,ori:0}));
+        }
+      } else if(colStrategy==='XRight'){
+        const nXcols=Math.max(1,Math.round(nC9b*(nR9/(nR9+nR0||1))));
+        const nOcols=Math.floor((maxW-nXcols*W9+EPS)/W0);
+        if(nOcols<1) return [];
+        const xsX=billboardSpread(nXcols,W9,nXcols*W9);
+        const xsO=billboardSpread(nOcols,W0,nOcols*W0);
+        const off=rp((pW-nXcols*W9-nOcols*W0)/2);
+        for(let r=0;r<Math.max(mR9,mR0);r++){
+          const yO=rp(r*D0),yX=rp(r*D9);
+          if(yO+D0<=maxL+EPS) xsO.forEach(x=>pls.push({x:rp(x+off),y:yO,w:W0,l:D0,ori:0}));
+          if(yX+D9<=maxL+EPS) xsX.forEach(x=>pls.push({x:rp(x+off+nOcols*W0),y:yX,w:W9,l:D9,ori:90}));
+        }
+      } else if(colStrategy==='XCenter'){
+        // O cols on sides, X cols in middle
+        const nXcols=Math.max(1,Math.min(nC9b-2,Math.round(nC9b*0.4)));
+        const nOside=Math.floor((maxW-nXcols*W9)/(2*W0));
+        if(nOside<1) return [];
+        const offX=rp((pW-nOside*W0-nXcols*W9-nOside*W0)/2);
+        const xsOL=billboardSpread(nOside,W0,nOside*W0);
+        const xsX=billboardSpread(nXcols,W9,nXcols*W9);
+        const xsOR=billboardSpread(nOside,W0,nOside*W0);
+        for(let r=0;r<Math.max(mR9,mR0);r++){
+          const yO=rp(r*D0),yX=rp(r*D9);
+          if(yO+D0<=maxL+EPS){
+            xsOL.forEach(x=>pls.push({x:rp(x+offX),y:yO,w:W0,l:D0,ori:0}));
+            xsOR.forEach(x=>pls.push({x:rp(x+offX+nOside*W0+nXcols*W9),y:yO,w:W0,l:D0,ori:0}));
+          }
+          if(yX+D9<=maxL+EPS) xsX.forEach(x=>pls.push({x:rp(x+offX+nOside*W0),y:yX,w:W9,l:D9,ori:90}));
+        }
+      }
+      return pls.filter(p=>p.x>=-ohIn-EPS&&p.y>=-ohIn-EPS&&p.x+p.w<=pW+ohIn+EPS&&p.y+p.l<=pL+ohIn+EPS);
+    };
+
+    // ── 11 orientation buckets × 5+ strategies ────────────────────────
+    const buckets=[0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0];
+    const bucketNames=['Pure O','10% X','20% X','30% X','40% X','50/50','60% X','70% X','80% X','90% X','Pure X'];
+
+    buckets.forEach((xRatio,bi)=>{
+      if(!can0&&xRatio<1) return;
+      if(!can9&&xRatio>0) return;
+      const {nR9,nR0}=getBucketRowCounts(xRatio);
+      if(nR9===0&&xRatio>0) return;
+      if(nR0===0&&xRatio<1) return;
+      const bName=bucketNames[bi];
+
+      // Row-ordering strategies
+      const strategies=[
+        {name:'Clustered',      rows:stratClustered(nR9,nR0)},
+        {name:'Clustered-Bot',  rows:stratClusteredBot(nR9,nR0)},
+        {name:'Distributed',    rows:stratDistributed(nR9,nR0)},
+        {name:'Perimeter',      rows:stratPerimeter(nR9,nR0)},
+        {name:'Core',           rows:stratCore(nR9,nR0)},
+        {name:'Alternating',    rows:stratAlternating(nR9,nR0)},
+      ];
+
+      strategies.forEach(strat=>{
+        if(nR9===0||nR0===0){
+          // Pure bucket — still try clustered (only one option)
+          if(strat.name!=='Clustered') return;
+        }
+        const pls=[];let y=0;
+        for(const rowType of strat.rows){
+          const isX=rowType===9;
+          const w=isX?W9:W0,d=isX?D9:D0,n=isX?mC9:mC0,ori=isX?90:0;
+          if(y+d>maxL+EPS) break;
+          makeRow(n,w,d,ori,y).forEach(c=>pls.push(c));
+          y=rp(y+d);
+        }
+        const f=pls.filter(p=>p.x>=-ohIn-EPS&&p.y>=-ohIn-EPS&&p.x+p.w<=pW+ohIn+EPS&&p.y+p.l<=pL+ohIn+EPS);
+        if(f.length)
+          addPat(`${bName} ${strat.name}`,
+            `${bName} (${Math.round(xRatio*100)}% X / ${Math.round((1-xRatio)*100)}% O) — ${strat.name} placement.`,f);
+      });
+
+      // Column-split variants for middle buckets
+      if(nR9>0&&nR0>0){
+        ['XLeft','XRight','XCenter'].forEach(cs=>{
+          const f=buildColBucket(nR9,nR0,cs);
+          if(f.length)
+            addPat(`${bName} ColSplit-${cs}`,
+              `${bName} column split — X-cases ${cs}.`,f);
+        });
+      }
+    });
+
+    // ════════════════════════════════════════════════════════════════
+    // COLUMN-SPLIT SWEEP (reference: Group B — progressive column splits)
+    // For a "narrow band" of nN columns in one orientation and a "fill
+    // band" of the OTHER orientation filling the remaining width, sweep
+    // nN from 1 up to (max columns - 1), on both Left and Right sides.
+    // Each band uses its OWN row count (rN/rF) since the two
+    // orientations have different depths — independent column-blocks
+    // side by side, each individually billboard-flush top-to-bottom.
+    //
+    // Run for BOTH narrowOri=90 (X-narrow-column, O fills) and
+    // narrowOri=0 (O-narrow-column, X fills) — "each 90°/0° scenario
+    // represented for X and O" per the reference.
+    // ════════════════════════════════════════════════════════════════
+    const colSplitSweep=(narrowOri)=>{
+      const isXNarrow=narrowOri===90;
+      const Wn=isXNarrow?W9:W0, Dn=isXNarrow?D9:D0;
+      const Wf=isXNarrow?W0:W9, Df=isXNarrow?D0:D9;
+      if(!(isXNarrow?can9:can0)||!(isXNarrow?can0:can9)) return;
+      const maxNarrowCols=Math.floor((maxW+EPS)/Wn);
+      for(let nN=1;nN<maxNarrowCols;nN++){
+        const remW=maxW-nN*Wn;
+        const nF=Math.floor((remW+EPS)/Wf);
+        if(nF<1) continue;
+        const rN=Math.floor((maxL+EPS)/Dn);
+        const rF=Math.floor((maxL+EPS)/Df);
+        if(rN<1||rF<1) continue;
+        [['Left',0],['Right',1]].forEach(([side,pos])=>{
+          const pls=[];
+          const totalW=nN*Wn+nF*Wf;
+          const off=rp((pW-totalW)/2);
+          const xsN=billboardSpread(nN,Wn,nN*Wn);
+          const xsF=billboardSpread(nF,Wf,nF*Wf);
+          const narrowX0=pos===0?off:off+nF*Wf;
+          const fillX0=pos===0?off+nN*Wn:off;
+          for(let r=0;r<rN;r++){
+            const y=rp(r*Dn); if(y+Dn>maxL+EPS) break;
+            xsN.forEach(x=>pls.push({x:rp(x+narrowX0),y,w:Wn,l:Dn,ori:narrowOri}));
+          }
+          for(let r=0;r<rF;r++){
+            const y=rp(r*Df); if(y+Df>maxL+EPS) break;
+            xsF.forEach(x=>pls.push({x:rp(x+fillX0),y,w:Wf,l:Df,ori:isXNarrow?0:90}));
+          }
+          const f=pls.filter(p=>p.x>=-ohIn-EPS&&p.y>=-ohIn-EPS&&p.x+p.w<=pW+ohIn+EPS&&p.y+p.l<=pL+ohIn+EPS);
+          if(f.length){
+            const lbl=isXNarrow?'X':'O';
+            addPat(`${nN}${lbl}-col ${side}`,
+              `Column split — ${nN} ${lbl}-oriented column(s) on the ${side.toLowerCase()}, remaining width filled with ${isXNarrow?'O':'X'}-oriented columns.`,f);
+          }
+        });
+      }
+    };
+    if(can9&&can0){ colSplitSweep(90); colSplitSweep(0); }
+
+    // ════════════════════════════════════════════════════════════════
+    // HEADER-ROW + COLUMN-SPLIT (reference: Group C — full-width header
+    // row in one orientation, then a column-split block below filling
+    // the remaining depth). Sweep both header orientations (X/O) and
+    // both narrow-column orientations within the split, both sides.
+    // ════════════════════════════════════════════════════════════════
+    const headerColSplit=(headerOri)=>{
+      const isXHeader=headerOri===90;
+      if(!(isXHeader?can9:can0)) return;
+      const Wh=isXHeader?W9:W0, Dh=isXHeader?D9:D0, nH=isXHeader?mC9:mC0;
+      if(nH<1||Dh>maxL+EPS) return;
+      const remL=maxL-Dh;
+      if(remL<Math.min(D0,D9)-EPS) return;
+
+      [0,90].forEach(narrowOri=>{
+        const isXNarrow=narrowOri===90;
+        const Wn=isXNarrow?W9:W0, Dn=isXNarrow?D9:D0;
+        const Wf=isXNarrow?W0:W9, Df=isXNarrow?D0:D9;
+        if(!(isXNarrow?can9:can0)||!(isXNarrow?can0:can9)) return;
+        const maxNarrowCols=Math.floor((maxW+EPS)/Wn);
+        for(let nN=1;nN<maxNarrowCols;nN++){
+          const remW=maxW-nN*Wn;
+          const nF=Math.floor((remW+EPS)/Wf);
+          if(nF<1) continue;
+          const rN=Math.floor((remL+EPS)/Dn);
+          const rF=Math.floor((remL+EPS)/Df);
+          if(rN<1||rF<1) continue;
+          [['Left',0],['Right',1]].forEach(([side,pos])=>{
+            const pls=[];
+            // Header row spans full width
+            const xsH=billboardSpread(nH,Wh,nH*Wh);
+            const offH=rp((pW-nH*Wh)/2);
+            xsH.forEach(x=>pls.push({x:rp(x+offH),y:0,w:Wh,l:Dh,ori:headerOri}));
+            // Column-split block below the header
+            const totalW=nN*Wn+nF*Wf;
+            const off=rp((pW-totalW)/2);
+            const xsN=billboardSpread(nN,Wn,nN*Wn);
+            const xsF=billboardSpread(nF,Wf,nF*Wf);
+            const narrowX0=pos===0?off:off+nF*Wf;
+            const fillX0=pos===0?off+nN*Wn:off;
+            for(let r=0;r<rN;r++){
+              const y=rp(Dh+r*Dn); if(y+Dn>maxL+EPS) break;
+              xsN.forEach(x=>pls.push({x:rp(x+narrowX0),y,w:Wn,l:Dn,ori:narrowOri}));
+            }
+            for(let r=0;r<rF;r++){
+              const y=rp(Dh+r*Df); if(y+Df>maxL+EPS) break;
+              xsF.forEach(x=>pls.push({x:rp(x+fillX0),y,w:Wf,l:Df,ori:isXNarrow?0:90}));
+            }
+            const f=pls.filter(p=>p.x>=-ohIn-EPS&&p.y>=-ohIn-EPS&&p.x+p.w<=pW+ohIn+EPS&&p.y+p.l<=pL+ohIn+EPS);
+            if(f.length){
+              const hLbl=isXHeader?'X':'O', nLbl=isXNarrow?'X':'O';
+              addPat(`${hLbl}-Header + ${nN}${nLbl}-col ${side}`,
+                `Full-width ${hLbl}-oriented header row, then a column split below — ${nN} ${nLbl}-oriented column(s) on the ${side.toLowerCase()}, remainder filled with ${isXNarrow?'O':'X'}-oriented columns.`,f);
+            }
+          });
+        }
+      });
+    };
+    if(can9) headerColSplit(90);
+    if(can0) headerColSplit(0);
+
+    {
+      const cornerDepth=Math.min(2,mR9);  // how many X-rows at each corner
+      if(cornerDepth>=1&&mR0>=2){
+        const pls=[];let y=0;
+        // Top X-band
+        for(let r=0;r<cornerDepth;r++){
+          if(y+D9>maxL+EPS) break;
+          makeRow(mC9,W9,D9,90,y).forEach(c=>pls.push(c)); y=rp(y+D9);
+        }
+        // Middle O-band
+        for(let r=0;r<mR0-cornerDepth*2;r++){
+          if(y+D0>maxL+EPS) break;
+          makeRow(mC0,W0,D0,0,y).forEach(c=>pls.push(c)); y=rp(y+D0);
+        }
+        // Bottom X-band
+        for(let r=0;r<cornerDepth;r++){
+          if(y+D9>maxL+EPS) break;
+          makeRow(mC9,W9,D9,90,y).forEach(c=>pls.push(c)); y=rp(y+D9);
+        }
+        const f=pls.filter(p=>p.x>=-ohIn-EPS&&p.y>=-ohIn-EPS&&p.x+p.w<=pW+ohIn+EPS&&p.y+p.l<=pL+ohIn+EPS);
+        if(f.length) addPat('Corner Accent','X-cases in top/bottom bands, O centre block.',f);
+      }
+    }
+
+    // ── Checkerboard: alternating X/O by row AND by column position ──
+    if(mC9>=2&&mR9>=2&&mC0>=2&&mR0>=2){
+      const pls=[];let y=0;
+      for(let r=0;r<mR9+mR0;r++){
+        const isX=r%2===0;
+        const w=isX?W9:W0,d=isX?D9:D0,n=isX?mC9:mC0,ori=isX?90:0;
+        if(y+d>maxL+EPS) break;
+        makeRow(n,w,d,ori,y).forEach(c=>pls.push(c)); y=rp(y+d);
+      }
+      const f=pls.filter(p=>p.x>=-ohIn-EPS&&p.y>=-ohIn-EPS&&p.x+p.w<=pW+ohIn+EPS&&p.y+p.l<=pL+ohIn+EPS);
+      if(f.length) addPat('Checkerboard','Alternating X/O rows — maximum seam interruption.',f);
+    }
+
+    // ── HEADER + COLUMN-SPLIT ("Group C" reference pattern) ──────────
+    // One full-width header row of orientation A, followed by a
+    // column-split below it: nAccent columns of orientation A on the
+    // left (stacked to fill the remaining depth) + the rest of the
+    // width filled with orientation B columns. Generated for BOTH
+    // header orientations (A=90° and A=0°) so every O/X combination
+    // shown in the reference is represented, for every accent-column
+    // count that fits.
+    {
+      const buildHeaderColSplit=(headerIs90,nAccent)=>{
+        const hW=headerIs90?W9:W0, hD=headerIs90?D9:D0, hOri=headerIs90?90:0;
+        const oW=headerIs90?W0:W9, oD=headerIs90?D0:D9, oOri=headerIs90?0:90;
+        const mCh=headerIs90?mC9:mC0;
+        if(nAccent<1||nAccent>=mCh) return [];
+        const pls=[];
+        // Header row spans full width at y=0
+        makeRow(mCh,hW,hD,hOri,0).forEach(c=>pls.push(c));
+        let y=hD;
+        // Column-split below: nAccent columns of header-orientation (left),
+        // remaining columns of the other orientation (right), each
+        // stacked independently to fill the remaining depth.
+        const accentSpan=nAccent*hW;
+        const otherCols=Math.floor((maxW-accentSpan+EPS)/oW);
+        if(otherCols<1) return [];
+        const off=rp((pW-(accentSpan+otherCols*oW))/2);
+        // Accent columns (header orientation), stacked at depth hD
+        for(let r=0;r*hD+y<=maxL+EPS-hD+EPS;r++){
+          const ry=rp(y+r*hD);
+          if(ry+hD>maxL+EPS) break;
+          for(let c=0;c<nAccent;c++) pls.push({x:rp(off+c*hW),y:ry,w:hW,l:hD,ori:hOri});
+        }
+        // Other columns (opposite orientation), stacked at depth oD
+        for(let r=0;r*oD+y<=maxL+EPS-oD+EPS;r++){
+          const ry=rp(y+r*oD);
+          if(ry+oD>maxL+EPS) break;
+          for(let c=0;c<otherCols;c++) pls.push({x:rp(off+accentSpan+c*oW),y:ry,w:oW,l:oD,ori:oOri});
+        }
+        return pls.filter(p=>p.x>=-ohIn-EPS&&p.y>=-ohIn-EPS&&p.x+p.w<=pW+ohIn+EPS&&p.y+p.l<=pL+ohIn+EPS);
+      };
+      [true,false].forEach(headerIs90=>{
+        const mCh=headerIs90?mC9:mC0;
+        const maxAccent=Math.max(1,Math.min(mCh-1,6));
+        for(let nAccent=1;nAccent<=maxAccent;nAccent++){
+          const f=buildHeaderColSplit(headerIs90,nAccent);
+          if(f.length>=4){
+            const hLabel=headerIs90?'X':'O', oLabel=headerIs90?'O':'X';
+            addPat(`Header-${hLabel} ColSplit-${nAccent}${hLabel}`,
+              `Full ${hLabel} header row + ${nAccent}-column ${hLabel} accent (left) / ${oLabel} fill (right) below.`,f);
+          }
+        }
+      });
+    }
+
+    // ── ALTERNATING MIXED ROWS ("checkerboard density" variants) ─────
+    // Generalises the reference's 2-row-alternating intra-row mixed
+    // patterns (groups 2-4 of the checkerboard section): consecutive
+    // rows swap which orientation occupies the left vs right side of
+    // the row, for a range of nO/nX splits. Each split is generated in
+    // BOTH starting orders (mix-first vs swap-first), which is the
+    // orientation-swap equivalent for this pattern family.
+    if(can0&&can9&&Math.abs(D0-D9)>EPS){
+      const mixDep=Math.max(D0,D9);
+      const splitsSeen=new Set();
+      const splits=[];
+      for(let nX=1;nX<=Math.max(1,Math.min(mC9-1,5));nX++){
+        const nO=Math.floor((maxW-nX*W9+EPS)/W0);
+        if(nO>=1&&nO<=mC0-1){
+          const key=nO+'_'+nX;
+          if(!splitsSeen.has(key)){splitsSeen.add(key);splits.push([nO,nX]);}
+        }
+      }
+      for(let nO=1;nO<=Math.max(1,Math.min(mC0-1,5));nO++){
+        const nX=Math.floor((maxW-nO*W0+EPS)/W9);
+        if(nX>=1&&nX<=mC9-1){
+          const key=nO+'_'+nX;
+          if(!splitsSeen.has(key)){splitsSeen.add(key);splits.push([nO,nX]);}
+        }
+      }
+      splits.forEach(([nO,nX])=>{
+        [['MixFirst',makeMixedRow,makeMixedRowSwap],['SwapFirst',makeMixedRowSwap,makeMixedRow]].forEach(([label,buildA,buildB])=>{
+          const pls=[];let y=0,r=0;
+          while(y+mixDep<=maxL+EPS){
+            const cases=(r%2===0?buildA:buildB)(nO,nX,y);
+            if(!cases.length) break;
+            cases.forEach(c=>pls.push(c));
+            y=rp(y+mixDep); r++;
+          }
+          const f=pls.filter(p=>p.x>=-ohIn-EPS&&p.y>=-ohIn-EPS&&p.x+p.w<=pW+ohIn+EPS&&p.y+p.l<=pL+ohIn+EPS);
+          if(f.length>=4){
+            addPat(`Alt-Mix ${nO}O+${nX}X ${label}`,
+              `Alternating mixed rows (${nO}O+${nX}X per row) — left/right orientation swaps each row for seam interruption.`,f);
+          }
+        });
+      });
+    }
+  } // end orientation-bucket engine
+
+  // ════════════════════════════════════════════════════════════════
+  // GAP-FILL OPTIMIZER  v2
+  // ────────────────────────────────────────────────────────────────
+  // Approach: for every pattern, compute a pixel-resolution occupancy
+  // grid, then systematically try placing every case at every
+  // grid-aligned X/Y position inside the pallet.  No shifting needed
+  // for most cases — the grid catches all geometrically valid spots.
+  //
+  // Extra cases must be:
+  //   • Non-overlapping with all existing cases
+  //   • Within pallet bounds (+ overhang)
+  //   • Valid orientation (0° or 90°)
+  //
+  // After filling, re-apply globalBillboard + recentre so the final
+  // layer is still flush and centred.
+  //
+  // Both the original pattern AND the filled version are registered —
+  // the original for engineers who want the clean version, the filled
+  // version for maximum case count.
+  // ════════════════════════════════════════════════════════════════
   {
-    const plsA_il5 = buildRowSchedule([0, 0], 90);
-    const plsB_il5 = rot180(buildRowSchedule([0, 0], 90));
+    const ohl=ohIn+EPS;
+    const PREC=1000; // round positions to 3 decimal places
 
-    if(plsA_il5.length && plsB_il5.length){
-      const p = mkPat(
-        'Interlock-5',
-        `Prefix-fill pattern. Layer A: Row 1 = 0°, Row 2 = 0°, then all remaining rows = 90°. `+
-        `Layer B: same pattern rotated 180°. Layers alternate A/B/A/B… All rows centred.`,
-        plsA_il5,
-        plsB_il5,
-        `A: rows 0°, 0°, 90°, 90°… | B: A rotated 180°`
+    // Round to precision
+    const rnd=v=>Math.round(v*PREC)/PREC;
+
+    // Does rectangle (ax,ay,aw,al) overlap (bx,by,bw,bl)?
+    const overlaps=(ax,ay,aw,al,bx,by,bw,bl)=>
+      ax+aw-EPS>bx && bx+bw-EPS>ax && ay+al-EPS>by && by+bl-EPS>ay;
+
+    // Can we place a case of (cw,cl) at (cx,cy) without overlapping pls?
+    const canPlace=(pls,cx,cy,cw,cl)=>{
+      if(cx<-ohl||cy<-ohl||cx+cw>pW+ohl||cy+cl>pL+ohl) return false;
+      for(const p of pls) if(overlaps(cx,cy,cw,cl,p.x,p.y,p.w,p.l)) return false;
+      return true;
+    };
+
+    // Greedily fill ALL free space in a placement set.
+    // Tries every (x,y) at case-dimension step increments.
+    // Tries 0° first, then 90°.  Keeps going until no more fit.
+    const fillAll=(basePls)=>{
+      let pls=[...basePls];
+      // Collect all unique x/y anchor positions from existing cases + pallet edges
+      // Use case dimensions as step size for the candidate grid
+      const steps=[
+        ...(can0?[{w:W0,l:D0,ori:0}]:[]),
+        ...(can9?[{w:W9,l:D9,ori:90}]:[]),
+      ];
+
+      let added=true;
+      while(added){
+        added=false;
+        for(const cas of steps){
+          // Build candidate x positions: every existing case left/right edge + 0
+          const xs=new Set([0]);
+          const ys=new Set([0]);
+          pls.forEach(p=>{xs.add(rnd(p.x));xs.add(rnd(p.x+p.w));});
+          pls.forEach(p=>{ys.add(rnd(p.y));ys.add(rnd(p.y+p.l));});
+          // Also try positions snapped to case-width grid from pallet edge
+          for(let x=0;x<=pW+ohIn+EPS;x=rnd(x+cas.w)) xs.add(rnd(x));
+          for(let y=0;y<=pL+ohIn+EPS;y=rnd(y+cas.l)) ys.add(rnd(y));
+
+          const xArr=[...xs].sort((a,b)=>a-b);
+          const yArr=[...ys].sort((a,b)=>a-b);
+
+          // Try every (x,y) candidate position
+          let bestX=null,bestY=null,bestScore=-1;
+          for(const cy of yArr){
+            for(const cx of xArr){
+              if(!canPlace(pls,cx,cy,cas.w,cas.l)) continue;
+              // Score: prefer positions that maximize adjacency with existing cases
+              // (touching as many other cases as possible = more stable)
+              let adj=0;
+              pls.forEach(p=>{
+                // Check if new case shares an edge with p
+                if(Math.abs(cx+cas.w-p.x)<EPS+0.1||Math.abs(p.x+p.w-cx)<EPS+0.1)
+                  if(cy<p.y+p.l-EPS&&cy+cas.l>p.y+EPS) adj++;
+                if(Math.abs(cy+cas.l-p.y)<EPS+0.1||Math.abs(p.y+p.l-cy)<EPS+0.1)
+                  if(cx<p.x+p.w-EPS&&cx+cas.w>p.x+EPS) adj++;
+              });
+              if(adj>bestScore){bestScore=adj;bestX=cx;bestY=cy;}
+            }
+          }
+
+          if(bestX!==null){
+            pls.push({x:rnd(bestX),y:rnd(bestY),w:cas.w,l:cas.l,ori:cas.ori});
+            added=true;
+          }
+        }
+      }
+      return pls;
+    };
+
+    // Merge adjacent free cells to find large contiguous free rects
+    // Returns merged list of {x,y,w,h}
+    const findMergedFreeRects=(pls)=>{
+      const mnX=Math.min(...pls.map(p=>p.x)), mxX=Math.max(...pls.map(p=>p.x+p.w));
+      const mnY=Math.min(...pls.map(p=>p.y)), mxY=Math.max(...pls.map(p=>p.y+p.l));
+      const xs=[...new Set([mnX,mxX,...pls.flatMap(p=>[p.x,p.x+p.w])])].sort((a,b)=>a-b);
+      const ys=[...new Set([mnY,mxY,...pls.flatMap(p=>[p.y,p.y+p.l])])].sort((a,b)=>a-b);
+      const cells=[];
+      for(let xi=0;xi<xs.length-1;xi++) for(let yi=0;yi<ys.length-1;yi++){
+        const rx=xs[xi],ry=ys[yi],rw=xs[xi+1]-xs[xi],rh=ys[yi+1]-ys[yi];
+        if(rw<EPS||rh<EPS) continue;
+        const occ=pls.some(p=>p.x<rx+rw-EPS&&p.x+p.w>rx+EPS&&p.y<ry+rh-EPS&&p.y+p.l>ry+EPS);
+        if(!occ) cells.push({x:rx,y:ry,w:rw,h:rh,xi,yi});
+      }
+      return cells;
+    };
+
+    // Check if a pattern has meaningful free space (>= one case area)
+    const minCaseArea=Math.min(W0*D0,W9*D9);
+    const hasEnoughFreeSpace=(pls)=>{
+      const mnX=Math.min(...pls.map(p=>p.x)), mxX=Math.max(...pls.map(p=>p.x+p.w));
+      const mnY=Math.min(...pls.map(p=>p.y)), mxY=Math.max(...pls.map(p=>p.y+p.l));
+      const bbox=(mxX-mnX)*(mxY-mnY);
+      const caseArea=pls.reduce((s,p)=>s+p.w*p.l,0);
+      return (bbox-caseArea)>=minCaseArea*0.8;
+    };
+
+    // Run gap-fill on every pattern
+    const snapshot=[...PATS];
+    for(const pat of snapshot){
+      if(!hasEnoughFreeSpace(pat.placements)) continue;
+
+      // Try filling all free space
+      const filled=fillAll([...pat.placements]);
+      const gained=filled.length-pat.placements.length;
+      if(gained<=0) continue;
+
+      // Validate the filled layer
+      if(!validate(filled)) continue;
+
+      // IMPORTANT: do NOT apply globalBillboard after gap-fill.
+      // The gap-fill places cases in interior voids — billboard would then
+      // try to spread those rows to match the outer row widths, creating
+      // overlaps with the newly inserted cases.
+      // Just recentre to maintain equal margins.
+      const finalPls=recentre(filled);
+      if(!validate(finalPls)) continue;
+      if(finalPls.length<=pat.placements.length) continue;
+
+      addPat(
+        pat.name+'★',
+        `${pat.desc} — gap-filled: +${finalPls.length-pat.placements.length} case(s).`,
+        finalPls
       );
-      if(p) PATS.push(p);
     }
   }
 
-  // ══════════════════════════════════════════════════════════════════════
-  // PATTERN 8 — Interlock-6
-  // Prefix pattern: Row 1 = 90°, Row 2 = 90°, Row 3 = 90°, then ALL remaining rows = 0°.
-  // Layer A: [90°, 90°, 90°, 0°, 0°, 0°…] top to bottom, centred.
-  // Layer B: same layout rotated 180° around pallet centre.
-  // Layers alternate A/B/A/B...
-  // ══════════════════════════════════════════════════════════════════════
-  {
-    const plsA_il6 = buildRowSchedule([90, 90, 90], 0);
-    const plsB_il6 = rot180(buildRowSchedule([90, 90, 90], 0));
+  // ════════════════════════════════════════════════════════════════
+  // DEDUP + SORT + CAP
+  // Remove trivially small patterns, sort by TI then score, and cap
+  // the final list to a manageable size for the UI. With the expanded
+  // row-type search + billboard fallback, small case footprints can
+  // generate 400-500+ structurally distinct patterns — far more than
+  // a packaging engineer needs to scroll through. Cap at 120, which
+  // still gives small cases 10x+ more variety than before while
+  // keeping the list browsable.
+  //
+  // GUARANTEED PATTERNS: the two pure single-orientation "column stack"
+  // patterns (all 0° / all 90°) represent the theoretical maximum case
+  // count for that orientation and are baseline reference patterns every
+  // packaging engineer expects to see. They are force-included even if
+  // mixed-orientation patterns elsewhere achieve a higher overall TI and
+  // would otherwise push them past the cap.
+  // ════════════════════════════════════════════════════════════════
+  const maxTI=PATS.reduce((m,p)=>Math.max(m,p.TI),0);
+  // Keep patterns within a useful range (not too far below max TI)
+  const minTI=Math.max(Math.ceil(maxTI*0.5), maxTI>12?6:maxTI>6?4:2);
+  const filtered=PATS.filter(p=>p.TI>=minTI);
+  filtered.sort((a,b)=>b.TI!==a.TI?b.TI-a.TI:b._score-a._score);
+  const MAX_RESULTS=120;
 
-    if(plsA_il6.length && plsB_il6.length){
-      const p = mkPat(
-        'Interlock-6',
-        `Prefix-fill pattern. Layer A: Rows 1–3 = 90°, then all remaining rows = 0°. `+
-        `Layer B: same pattern rotated 180°. Layers alternate A/B/A/B… All rows centred.`,
-        plsA_il6,
-        plsB_il6,
-        `A: rows 90°, 90°, 90°, 0°, 0°… | B: A rotated 180°`
-      );
-      if(p) PATS.push(p);
-    }
+  // Find the highest-TI pure-O and pure-X patterns from the FULL
+  // (unfiltered) registry — these represent each orientation's true max.
+  const bestPureO=PATS.reduce((best,p)=>
+    (p.placements.every(c=>c.ori===0)&&(!best||p.TI>best.TI))?p:best, null);
+  const bestPureX=PATS.reduce((best,p)=>
+    (p.placements.every(c=>c.ori===90)&&(!best||p.TI>best.TI))?p:best, null);
+
+  // Give the two guaranteed patterns clear, recognisable names
+  if(bestPureO){
+    bestPureO.name='100% Column Stack (0°)';
+    bestPureO.desc=`All ${bestPureO.TI} cases at 0° — maximum case count for this orientation, flush perimeter, evenly distributed interior spacing.`;
+  }
+  if(bestPureX){
+    bestPureX.name='100% Column Stack (90°)';
+    bestPureX.desc=`All ${bestPureX.TI} cases at 90° — maximum case count for this orientation, flush perimeter, evenly distributed interior spacing.`;
   }
 
-  return PATS;
+  // Build final list: take top (MAX_RESULTS - forced) from filtered,
+  // excluding the forced patterns (to avoid duplicates), then append
+  // the forced patterns. This guarantees both pure patterns survive
+  // without the pop/push-ordering bug of removing each other.
+  const forced=[bestPureO,bestPureX].filter(Boolean);
+  const rest=filtered.filter(p=>!forced.includes(p));
+  const result=[...rest.slice(0,Math.max(0,MAX_RESULTS-forced.length)),...forced];
+
+  result.sort((a,b)=>b.TI!==a.TI?b.TI-a.TI:b._score-a._score);
+  return result;
 }
+
+
+
+
 // ═══════════════════════════════════════════════════════════════
 function getPlsForLayer(layerIdx){
   if(ST.multiMode) return ST.placements;
@@ -1441,556 +2107,246 @@ function getPlsForLayer(layerIdx){
   }
   // Multi-case manual build: no edits yet = empty layer (user builds from scratch)
   if(pat.multiCaseManual) return [];
-  // Single-case: fall back to pattern's A or B placements
-  const useB = pat.placementsB && pat.placements !== pat.placementsB && layerIdx%2===1;
+  // Interlock mode (single-case only): odd layers use 180°-rotated placementsB
+  const useB = !!(ST.interlockMode && pat.placementsB && layerIdx%2===1);
   return useB ? pat.placementsB : pat.placements;
 }
-// ═══════════════════════════════════════════════════════════════
-// AI PATTERN OPTIMIZER
-// Uses a guided local-search (hill-climbing + greedy gap-fill)
-// to generate up to 4 optimized pallet patterns beyond the 8
-// geometric templates. Scored on cubic efficiency, stability,
-// case support, and centering — same metrics as the main engine.
-// Runs entirely client-side, no API needed.
-// ═══════════════════════════════════════════════════════════════
-function runAIOptimizer(cW, cL, pW, pL, existingPatterns){
-  const OH = (ST.maxOverhang===''||ST.maxOverhang===null) ? 0 : parseFloat(ST.maxOverhang)||0;
-  const ohIn = ST.isMetric ? OH/25.4 : OH;
-  const EPSILON_AI = 0.0001;
-
-  // ── Score a layer of placements 0–100 ──────────────────────────
-  function scorePls(plsA, plsB){
-    if(!plsA || !plsA.length) return 0;
-    const footprint = plsA.reduce((s,p)=>s+p.w*p.l, 0);
-    const cubicEff  = footprint / (pW * pL);
-    const supp      = caseSupportPct(plsA, pW, pL, 0, 1, plsB||plsA);
-    const centering = weightDistScore(plsA, pW, pL) / 100;
-    const hasIL     = !!(plsB && plsB !== plsA);
-    const mxX = Math.max(...plsA.map(p=>p.x+p.w));
-    const mnX = Math.min(...plsA.map(p=>p.x));
-    const mxY = Math.max(...plsA.map(p=>p.y+p.l));
-    const mnY = Math.min(...plsA.map(p=>p.y));
-    const ohW = ((mxX-mnX)-pW)/2, ohL = ((mxY-mnY)-pL)/2;
-    const stab = newStability(hasIL, supp.avg, centering*100, ohW, ohL) / 100;
-    // Weighted composite — efficiency most important, then stability, support, centering
-    return cubicEff*0.45 + stab*0.25 + (supp.avg/100)*0.20 + centering*0.10;
-  }
-
-  // ── Check a placement is in-bounds and non-overlapping ─────────
-  function valid(p, others){
-    if(p.x < -ohIn-EPSILON_AI) return false;
-    if(p.y < -ohIn-EPSILON_AI) return false;
-    if(p.x+p.w > pW+ohIn+EPSILON_AI) return false;
-    if(p.y+p.l > pL+ohIn+EPSILON_AI) return false;
-    return !others.some(o=>
-      !(p.x+p.w<=o.x+EPSILON_AI || o.x+o.w<=p.x+EPSILON_AI ||
-        p.y+p.l<=o.y+EPSILON_AI || o.y+o.l<=p.y+EPSILON_AI)
-    );
-  }
-
-  // ── Greedy gap-fill: try to place more cases in empty space ────
-  function gapFill(pls, ori){
-    const W = ori===90 ? cL : cW, L = ori===90 ? cW : cL;
-    const STEP = 0.25; // inch grid
-    const result = [...pls];
-    for(let y=0; y<=pL+ohIn-L+EPSILON_AI; y=r2(y+STEP)){
-      for(let x=0; x<=pW+ohIn-W+EPSILON_AI; x=r2(x+STEP)){
-        const p={x:r2(x-ohIn/2), y:r2(y-ohIn/2), w:W, l:L, ori};
-        const px=Math.round((x)*4)/4, py=Math.round((y)*4)/4;
-        const pp={x:r2(px), y:r2(py), w:W, l:L, ori};
-        if(valid(pp, result)) result.push(pp);
-      }
-    }
-    return result;
-  }
-
-  // ── Build a tight-packed layer with a given offset (x0, y0) ───
-  function packLayer(ori, x0, y0){
-    const W = ori===90 ? cL : cW, L = ori===90 ? cW : cL;
-    const pls=[];
-    let row=0;
-    for(let y=y0; y<=pL+ohIn-L+EPSILON_AI; y=r2(y+L)){
-      const rowX = x0 + (row%2===1 ? W/2 : 0); // brick-bond offset for odd rows
-      for(let x=rowX; x<=pW+ohIn-W+EPSILON_AI; x=r2(x+W)){
-        const p={x:r2(x), y:r2(y), w:W, l:L, ori};
-        if(p.x >= -ohIn-EPSILON_AI && p.y >= -ohIn-EPSILON_AI &&
-           p.x+W <= pW+ohIn+EPSILON_AI && p.y+L <= pL+ohIn+EPSILON_AI){
-          pls.push(p);
-        }
-      }
-      row++;
-    }
-    return pls;
-  }
-
-  // ── Rotate a layer 180° around the pallet centre ───────────────
-  function rot180(pls){
-    return pls.map(p=>({...p,
-      x:r2(pW-p.x-p.w),
-      y:r2(pL-p.y-p.l)
-    }));
-  }
-
-  // ── Centre a set of placements on the pallet ───────────────────
-  function centre(pls){
-    if(!pls.length) return pls;
-    const mxX=Math.max(...pls.map(p=>p.x+p.w));
-    const mnX=Math.min(...pls.map(p=>p.x));
-    const mxY=Math.max(...pls.map(p=>p.y+p.l));
-    const mnY=Math.min(...pls.map(p=>p.y));
-    const dx = (pW-(mxX-mnX))/2 - mnX;
-    const dy = (pL-(mxY-mnY))/2 - mnY;
-    return pls.map(p=>({...p, x:r2(p.x+dx), y:r2(p.y+dy)}));
-  }
-
-  // ── Generate candidate layers with different strategies ────────
-  const candidates = [];
-
-  // Strategy A: tight column pack with different offsets
-  for(const ori of [0, 90]){
-    for(const dx of [0, 0.5, -0.5, 0.25]){
-      for(const dy of [0, 0.5, -0.5, 0.25]){
-        const pls = packLayer(ori, dx, dy);
-        if(pls.length > 0) candidates.push({pls, ori, tag:'col'});
-      }
-    }
-  }
-
-  // Strategy B: brick-bond (already in packLayer with row%2 offset)
-  // Strategy C: herringbone — alternate 0° and 90° rows
-  for(const startOri of [0, 90]){
-    const W0=cW, L0=cL, W1=cL, L1=cW;
-    const pls=[];
-    let row=0, y=0;
-    while(y<=pL+ohIn-Math.min(L0,L1)+EPSILON_AI){
-      const ori=row%2===0 ? startOri : (startOri===0?90:0);
-      const W=ori===90?W1:W0, L=ori===90?L1:L0;
-      for(let x=0; x<=pW+ohIn-W+EPSILON_AI; x=r2(x+W)){
-        const p={x:r2(x), y:r2(y), w:W, l:L, ori};
-        if(p.x>=-ohIn-EPSILON_AI && p.y>=-ohIn-EPSILON_AI &&
-           p.x+W<=pW+ohIn+EPSILON_AI && p.y+L<=pL+ohIn+EPSILON_AI)
-          pls.push(p);
-      }
-      y=r2(y+L); row++;
-    }
-    if(pls.length>0) candidates.push({pls, ori:startOri, tag:'herring'});
-  }
-
-  // Strategy D: gap-fill on top of best existing pattern
-  const best = existingPatterns
-    .filter(p=>p.placements&&p.placements.length>0)
-    .sort((a,b)=>(b.cubicEff||0)-(a.cubicEff||0))[0];
-  if(best){
-    const filled0 = gapFill([...best.placements], 0);
-    const filled90 = gapFill([...best.placements], 90);
-    if(filled0.length > best.placements.length)  candidates.push({pls:filled0, ori:0, tag:'fill0'});
-    if(filled90.length > best.placements.length) candidates.push({pls:filled90, ori:90, tag:'fill90'});
-  }
-
-  // ── Score and rank all candidate pairs (A, rot180(A)) ──────────
-  const scored = [];
-  candidates.forEach(({pls, ori, tag})=>{
-    if(pls.length===0) return;
-    const plsB = rot180(pls);
-    const sc = scorePls(pls, plsB);
-    const sc2 = scorePls(centre(pls), rot180(centre(pls)));
-    const finalPls  = sc2 > sc ? centre(pls) : pls;
-    const finalPlsB = rot180(finalPls);
-    scored.push({pls:finalPls, plsB:finalPlsB, score:Math.max(sc,sc2), tag, ori});
-  });
-
-  scored.sort((a,b)=>b.score-a.score);
-
-  // ── Deduplicate: remove candidates with TI identical to existing ─
-  const existingTIs = new Set(existingPatterns.map(p=>p.TI||p.count||0));
-  const unique = [];
-  const seenTIs = new Set();
-  for(const c of scored){
-    const TI = c.pls.length;
-    if(!seenTIs.has(TI)){
-      seenTIs.add(TI);
-      unique.push(c);
-    }
-    if(unique.length >= 4) break;
-  }
-
-  // ── Build pattern records matching mkPat structure ──────────────
-  const aiPats = [];
-  unique.forEach((c, i) => {
-    const {pls, plsB, tag, ori} = c;
-    if(!pls || pls.length === 0) return;
-    const footprint = pls.reduce((s,p)=>s+p.w*p.l, 0);
-    const cubicEff  = r2(footprint/(pW*pL)*100);
-    const mxX=Math.max(...pls.map(p=>p.x+p.w));
-    const mnX=Math.min(...pls.map(p=>p.x));
-    const mxY=Math.max(...pls.map(p=>p.y+p.l));
-    const mnY=Math.min(...pls.map(p=>p.y));
-    const ohW = r2(((mxX-mnX)-pW)/2);
-    const ohL = r2(((mxY-mnY)-pL)/2);
-    const supp = caseSupportPct(pls, pW, pL, 0, 1, plsB);
-    const cen  = weightDistScore(pls, pW, pL);
-    const stab = newStability(true, supp.avg, cen, ohW, ohL);
-    const il   = r2(overlapRatio(pls, plsB)*100);
-
-    const tagNames = {col:'Compact Column', herring:'Herringbone', fill0:'Gap-Fill 0°', fill90:'Gap-Fill 90°'};
-    const name = `AI-${i+1}: ${tagNames[tag]||tag}`;
-    const desc = `AI-optimized pattern. Strategy: ${tagNames[tag]||tag}. Score: ${r2(c.score*100)}%.`;
-
-    aiPats.push({
-      name, desc,
-      orientDesc: ori===0?'0° / 180°':'90° / 270°',
-      placements: pls,
-      placementsB: plsB,
-      count: pls.length, TI: pls.length, TI_B: plsB.length,
-      ohW, ohL,
-      cubicEff, palUtilPct: cubicEff,
-      caseSupportPct: supp.avg, minCaseSupport: supp.min,
-      stability: stab, interlockPct: il,
-      orisA: ori===0?'0°':'90°', orisB: ori===0?'180°':'270°',
-      zoneW:pW, zoneL:pL, ohIn,
-      wdA: cen, wdB: cen,
-      masterW:r2(pW), masterL:r2(pL),
-      aiGenerated: true,
-    });
-  });
-
-  return aiPats;
-}
-// ═══════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════
-// CALCULATE
-// ═══════════════════════════════════════════════════════════════
-// ── Sync all left-panel DOM inputs → ST before calculate ─────────────
-// Called by calculate() so the UPDATE button always uses current values
-// even if oninput never fired (paste, tab, programmatic set).
-function _syncInputsToST(){
-  // Max height
-  const maxHEl = document.getElementById('maxHI');
-  if(maxHEl) ST.maxH = maxHEl.value;
-
-  // Max overhang
-  const maxOHEl = document.getElementById('maxOHI');
-  if(maxOHEl) ST.maxOverhang = maxOHEl.value;
-
-  // Pallet weight limit
-  const palWtEl = document.getElementById('palWtI');
-  if(palWtEl) ST.palletWeightLimit = palWtEl.value;
-
-  // Slip sheets checkbox
-  const ssEl = document.getElementById('ssYes');
-  if(ssEl) ST.slipSheets = ssEl.checked;
-
-  // Custom pallet dims
-  const custL = document.getElementById('custPalL');
-  const custW = document.getElementById('custPalW');
-  const custH = document.getElementById('custPalH');
-  const custWt= document.getElementById('custPalWt');
-  if(custL && custW && custH && ST.palletKey === 'custom'){
-    PALLETS.custom.l = parseFloat(custL.value) || PALLETS.custom.l;
-    PALLETS.custom.w = parseFloat(custW.value) || PALLETS.custom.w;
-    PALLETS.custom.h = parseFloat(custH.value) || PALLETS.custom.h;
-    if(custWt){
-      const rawWt = parseFloat(custWt.value) || 0;
-      PALLETS.custom.tare = ST.isMetric ? rawWt / 0.453592 : rawWt;
-    }
-  }
-
-  // Case dimensions and weights — read from all rendered input fields
-  ST.cases.forEach(c => {
-    const cc = document.getElementById('cc'+c.id);
-    if(!cc) return;
-    const inputs = cc.querySelectorAll('input[type=number]');
-    // Fields are rendered in order: L, W, H, weight, pct
-    // Use the oninput attribute value to find field names
-    cc.querySelectorAll('input').forEach(inp => {
-      const oi = inp.getAttribute('oninput') || inp.getAttribute('onchange') || '';
-      const m = oi.match(/updateCase\(\d+,'(\w+)',/);
-      if(m){
-        const field = m[1];
-        if(field !== 'color' && field !== 'label'){
-          c[field] = inp.value;
-        }
-      }
-    });
-    // Also sync label and color
-    cc.querySelectorAll('input[type=text]').forEach(inp => {
-      const oi = inp.getAttribute('onchange') || '';
-      if(oi.includes("'label'")) c.label = inp.value;
-    });
-    cc.querySelectorAll('input[type=color]').forEach(inp => {
-      const oi = inp.getAttribute('onchange') || '';
-      if(oi.includes("'color'")) c.color = inp.value;
-    });
-  });
-}
-
-function calculate(){
-  // ── Sync ALL left-panel inputs into ST before calculating ─────────
-  // This ensures the UPDATE button picks up every field regardless of
-  // whether oninput fired (handles paste, tab-away, programmatic changes).
-  _syncInputsToST();
-
-  const valid=ST.cases.filter(c=>cv(c.w)>0&&cv(c.l)>0&&cv(c.h)>0);
-  if(!valid.length) return;
-  // Exit side view whenever we recalculate — ensures pallet editor is always accessible
-  LE.sideView = null;
-  const pal=PALLETS[ST.palletKey],pW=pal.w,pL=pal.l,pH=pal.h;
-  // Treat empty, zero, or NaN maxH as "no limit" — Infinity means layers only limited by case height
-  const rawMaxH = parseFloat(ST.maxH);
-  const hasMaxH = ST.maxH !== '' && ST.maxH !== undefined && ST.maxH !== null && rawMaxH > 0 && isFinite(rawMaxH);
-  const maxHin  = hasMaxH ? cv(ST.maxH) : Infinity;
-  const maxOH=ST.maxOverhang?cv(ST.maxOverhang):99;
-  document.getElementById('ph').style.display='none';
-
-  if(valid.length===1){
-    ST.multiMode=false;
-    const c=valid[0],cW=cv(c.w),cL=cv(c.l),cH=cv(c.h);
-
-    // ── Max height validation ─────────────────────────────────────
-    // Only validate if user has actually entered a positive number.
-    // Empty field or zero = no limit — fall through normally.
-    if(hasMaxH && maxHin < (pH + cH)){
-      const minPossibleH = pH + cH;
-      document.getElementById('ph').style.display='none';
-      const statsBox=document.getElementById('statsBox');
-      if(statsBox){
-        statsBox.style.display='block';
-        const rows=document.getElementById('statsRows');
-        if(rows) rows.innerHTML=`<div class="aw w" style="margin:6px 0;">
-          ⚠ MAX STACK HEIGHT TOO LOW<br>
-          <span style="font-size:8px;color:#ccc;">
-            Minimum required: ${dp(minPossibleH)} ${u()} (pallet ${dp(pH)} + 1 case ${dp(cH)})<br>
-            Current limit: ${dp(maxHin)} ${u()} — increase max height or reduce case height.
-          </span></div>`;
-        document.getElementById('maxHA').innerHTML='<div class="aw w">⚠ HEIGHT LIMIT BELOW MINIMUM</div>';
-      }
-      return;
-    }
-
-    // HI (Layers High) = floor((availableHeight) / caseHeight)
-    // availableHeight = maxStackHeight − palletDeckHeight
-    // When no max height entered: use the current trailer interior height as the ceiling
-    // so Total Cases reflects what actually fits in the selected trailer.
-    const trailerH = TRK.dims ? TRK.dims.H : 110;  // trailer interior height in inches
-    const defaultMaxH = trailerH;                   // cases fill to trailer ceiling
-    const effectiveMaxH = hasMaxH ? maxHin : defaultMaxH;
-    const maxL = cH>0 ? Math.max(1, Math.floor((effectiveMaxH - pH) / cH)) : 1;
-    ST.layers=maxL;
-    ST.patterns=buildPatterns(cW,cL,pW,pL);
-    ST.layerStack = []; // reset per-layer overrides when patterns rebuild
-    // ── AI Optimizer: generate additional optimized patterns ──────
-    try{
-      const aiPats = runAIOptimizer(cW, cL, pW, pL, ST.patterns);
-      aiPats.forEach(p => ST.patterns.push(p));
-    }catch(e){ console.warn('[AI optimizer]', e); }
-    // Apply multi-case color mix to generated placements
-    applyMultiCaseMix(ST.patterns, valid);
-    // Preserve the selected pattern index across recalculates (e.g. unit toggle)
-    // Only clamp if the previously selected index is now out of range
-    if(ST.selPat >= ST.patterns.length) ST.selPat = 0;
-    // Only clear layer edits if this is a genuine new case/pallet calculation
-    // (not a unit-toggle recalculate which preserves edits)
-    if(!ST._preserveEdits){
-      ST.layerEdits={};
-      ST._patEdits={};      // clear all per-pattern edits on fresh recalculate
-      ST._patModified = new Set(); // clear all modified flags
-      LE.selectedSet.clear(); LE.activeMode=null;
-    }
-    ST._preserveEdits=false;
-    // pdrop removed
-    if(ST.patterns.length>0){
-      const b=ST.patterns[0];
-      const tH=r2(pH+cH*maxL);
-      const ohIn2=ST.isMetric?(parseFloat(ST.maxOverhang)||0)/25.4:(parseFloat(ST.maxOverhang)||0);
-      // Weight distribution — average of layer A and B
-      const palW2=pal.w,palL2=pal.l;
-      const wdA=b.wdA||weightDistScore(b.placements,palW2,palL2);
-      const wdB=b.placementsB?b.wdB||weightDistScore(b.placementsB,palW2,palL2):wdA;
-      const wdAvg=r2((wdA+wdB)/2);
-      // Compute initial unit load footprint from pattern placements
-      const plsA0 = b.placements || [];
-      const initMxX = plsA0.length ? Math.max(...plsA0.map(p=>p.x+p.w)) : pW;
-      const initMxY = plsA0.length ? Math.max(...plsA0.map(p=>p.y+p.l)) : pL;
-      const initMnX = plsA0.length ? Math.min(...plsA0.map(p=>p.x)) : 0;
-      const initMnY = plsA0.length ? Math.min(...plsA0.map(p=>p.y)) : 0;
-      const initULW = initMxX - initMnX;  // outermost case block width (inches)
-      const initULL = initMxY - initMnY;  // outermost case block length (inches)
-      ST.stats={
-        palW:dp(palW2),palL:dp(palL2),palH:dp(pH),totalH:dp(tH),
-        ovW:dp(b.ohW),ovL:dp(b.ohL),
-        // TI/HI
-        TI:b.TI,           // cases per layer (tier index)
-        HI:maxL,           // layers high (high index)
-        caseCount:calcTotalCases(b.TI,maxL,b.placementsB&&b.placementsB!==b.placements?b.placementsB.length:b.TI),
-        perLayer:b.TI,
-        layers:maxL,
-        // Efficiency & utilization
-        cubicEff:b.cubicEff,
-        palUtilPct:b.cubicEff,
-        // Stability metrics
-        stability:b.stability,
-        interlockPct:b.interlockPct||0,
-        seamFracA:b.seamFracA,seamFracB:b.seamFracB,
-        wdA,wdB,wdAvg,
-        // Orientation
-        orisA:b.orisA,orisB:b.orisB,
-        orientDesc:b.orientDesc,
-        // Overhang
-        maxH: hasMaxH ? dp(maxHin) : '—',
-        overLimit: hasMaxH && tH > maxHin,
-        _cH:cH,_cW:cW,_cL:cL,
-        // Pattern metadata
-        patName:b.name,patDesc:b.desc,patCat:'',
-        caseLabel:c.label,alternating:!!b.placementsB,
-        edgeOffset:ST.maxOverhang,ohIn:ohIn2,
-        zoneW:dp(b.zoneW),zoneL:dp(b.zoneL),
-        // Raw inch values for Load Dimensions (case block outermost extent)
-        unitLoadW_in: initULW,    // outermost case block width in inches
-        unitLoadL_in: initULL,    // outermost case block length in inches
-        caseStackH_in: cH * maxL, // case stack height only (no pallet deck) in inches
-        unitLoadW: dp(initULW),
-        unitLoadL: dp(initULL),
-      };
-    }
-  } else {
-    // ── MULTI-CASE MODE: no auto-generated patterns ───────────────
-    // User builds each layer manually using the Layer Stack panel.
-    ST.multiMode = false;
-    const c0 = valid[0], cH0 = cv(c0.h);
-    const trailerH2 = TRK.dims ? TRK.dims.H : 110;
-    const effectiveMaxH2 = hasMaxH ? maxHin : trailerH2;
-    const maxL2 = cH0 > 0 ? Math.max(1, Math.floor((effectiveMaxH2 - pH) / cH0)) : 1;
-    ST.layers = maxL2;
-    ST.layerStack = [];
-
-    // One blank "Manual Build" pattern — all layers start empty
-    ST.patterns = [{
-      name: 'Manual Build',
-      desc: `Multi-case manual layout. Add cases to each layer using the Layer Stack panel.`,
-      orientDesc: 'Manual',
-      placements: [],
-      placementsB: null,
-      count: 0, TI: 0, TI_B: 0,
-      ohW: 0, ohL: 0,
-      cubicEff: 0, palUtilPct: 0,
-      caseSupportPct: 0, minCaseSupport: 0,
-      stability: 0, interlockPct: 0,
-      orisA: '—', orisB: '—',
-      zoneW: pW, zoneL: pL, ohIn: 0,
-      wdA: 0, wdB: 0,
-      masterW: dp(pW), masterL: dp(pL),
-      multiCaseManual: true,
-    }];
-
-    ST.selPat = 0;
-    if(!ST._preserveEdits){
-      ST.layerEdits = {};
-      ST._patEdits = {};
-      ST._patModified = new Set();
-      LE.selectedSet.clear(); LE.activeMode = null;
-    }
-    ST._preserveEdits = false;
-
-    const tH2 = r2(pH + cH0 * maxL2);
-    ST.stats = {
-      palW: dp(pW), palL: dp(pL), palH: dp(pH), totalH: dp(tH2),
-      ovW: '0', ovL: '0',
-      TI: 0, HI: maxL2, caseCount: 0, perLayer: 0, layers: maxL2,
-      cubicEff: '0', palUtilPct: 0,
-      stability: 0, interlockPct: 0,
-      patName: 'Manual Build', alternating: false,
-      _cH: cH0, _cW: cv(c0.w), _cL: cv(c0.l),
-      unitLoadW_in: pW, unitLoadL_in: pL,
-      caseStackH_in: cH0 * maxL2,
-      unitLoadW: dp(pW), unitLoadL: dp(pL),
-      multiCase: true, caseCount_mc: valid.length,
-      multiCaseManual: true,  // enables gravity in 3D render
-    };
-  }
-  renderSlipSheetUI();
-  // Always hide placeholder and show canvas when we have results
-  document.getElementById('ph').style.display = 'none';
-  // Explicitly show stats box before renderAll
-  if(ST.stats){
-    const sb = document.getElementById('statsBox');
-    if(sb) sb.style.display = 'block';
-  }
-  renderAll();
-  leInitCanvas();
-  leUpdateBar();
-  // Auto-generate truck load view after every calculation
-  trkUpdateStackButtons();
-  trkGenerate();
-}
-
-
-// ═══════════════════════════════════════════════════════════════
-// SLIP SHEET UI (rendered after calculate)
-// ═══════════════════════════════════════════════════════════════
-function renderSlipSheetUI(){
-  const div=document.getElementById('ssUI');
-  if(!ST.slipSheets||!ST.stats){div.style.display='none';return;}
-  const layers=ST.stats.layers||1;
-  let html=`<div class="dl" style="margin-bottom:2px;margin-top:2px;">SLIP SHEET POSITIONS</div>`;
-  html+=`<div style="font-size:7px;color:var(--dm);margin-bottom:4px;">Base = on top of pallet deck. 1…N = above that case layer.</div>`;
-  // Select All / Deselect All row
-  html+=`<div style="display:flex;gap:4px;margin-bottom:5px;">
-    <button onclick="ssSelectAll()" style="background:#1a2a1a;color:#5ec97a;border:1px solid #2a4a2a;border-radius:3px;padding:2px 8px;font-size:10px;font-family:'Share Tech Mono',monospace;cursor:pointer;letter-spacing:.5px;">✔ Select All</button>
-    <button onclick="ssDeselectAll()" style="background:#2a1a1a;color:#c0392b;border:1px solid #4a2a2a;border-radius:3px;padding:2px 8px;font-size:10px;font-family:'Share Tech Mono',monospace;cursor:pointer;letter-spacing:.5px;">✕ Deselect All</button>
-  </div>`;
-  html+=`<div style="display:flex;flex-wrap:wrap;gap:3px;">`;
-  for(let i=0;i<=layers;i++){
-    const checked=ST.slipSheetLayers.includes(i)?'checked':'';
-    const lbl=i===0?'Base':i===layers?`Top(${i})`:String(i);
-    html+=`<label style="display:flex;align-items:center;gap:2px;font-size:9px;cursor:pointer;background:#333333;padding:2px 5px;border-radius:3px;border:1px solid var(--bd);">
-      <input type="checkbox" ${checked} onchange="toggleSlipLayer(${i},this.checked)" style="width:11px;height:11px;accent-color:var(--go);"/>
-      ${lbl}</label>`;
-  }
-  html+='</div>';
-  div.style.display='block';
-  div.innerHTML=html;
-}
-
-function ssSelectAll(){
-  if(!ST.stats) return;
-  const layers=ST.stats.layers||1;
-  ST.slipSheetLayers=[];
-  for(let i=0;i<=layers;i++) ST.slipSheetLayers.push(i);
-  renderSlipSheetUI();
-  if(ST.view==='3d') build3D(); else draw2D();
-  if(ST.stats) renderStats();
-}
-
-function ssDeselectAll(){
-  ST.slipSheetLayers=[];
-  renderSlipSheetUI();
-  if(ST.view==='3d') build3D(); else draw2D();
-  if(ST.stats) renderStats();
-}
-
-function toggleSlipLayer(n,on){
-  if(on){if(!ST.slipSheetLayers.includes(n)) ST.slipSheetLayers.push(n);}
-  else {ST.slipSheetLayers=ST.slipSheetLayers.filter(x=>x!==n);}
-  if(ST.view==='3d') build3D();
-  else draw2D();
-}
-function renderOpts(){}
-
 // ═══════════════════════════════════════════════════════════════
 // ACTIVE PLACEMENTS — returns placements for a given layer index
 // For alternating patterns, even layers use placementsB
 // ═══════════════════════════════════════════════════════════════
 
+// ── Sync all left-panel DOM inputs → ST before calculate ─────────────
+function _syncInputsToST(){
+  const maxHEl=document.getElementById('maxHI'); if(maxHEl) ST.maxH=maxHEl.value;
+  const maxOHEl=document.getElementById('maxOHI'); if(maxOHEl) ST.maxOverhang=maxOHEl.value;
+  const palWtEl=document.getElementById('palWtI'); if(palWtEl) ST.palletWeightLimit=palWtEl.value;
+  const ssEl=document.getElementById('ssYes'); if(ssEl) ST.slipSheets=ssEl.checked;
+  if(ST.palletKey==='custom'){
+    const cL2=document.getElementById('custPalL'),cW2=document.getElementById('custPalW'),
+          cH2=document.getElementById('custPalH'),cWt2=document.getElementById('custPalWt');
+    if(cL2) PALLETS.custom.l=parseFloat(cL2.value)||PALLETS.custom.l;
+    if(cW2) PALLETS.custom.w=parseFloat(cW2.value)||PALLETS.custom.w;
+    if(cH2) PALLETS.custom.h=parseFloat(cH2.value)||PALLETS.custom.h;
+    if(cWt2){ const wt=parseFloat(cWt2.value)||0; PALLETS.custom.tare=ST.isMetric?wt/0.453592:wt; }
+  }
+  // Sync case dims — only overwrite if DOM has a non-empty value
+  ST.cases.forEach(c=>{
+    const cc=document.getElementById('cc'+c.id); if(!cc) return;
+    cc.querySelectorAll('input').forEach(inp=>{
+      const oi=inp.getAttribute('oninput')||inp.getAttribute('onchange')||'';
+      const mf=oi.match(/updateCase\(\d+,'(\w+)',/);
+      if(mf){
+        const field=mf[1];
+        if(field!=='color'&&field!=='label'){
+          // Only overwrite ST value if DOM has a value — prevents erasing dims already set
+          if(inp.value!=='' && inp.value!==null) c[field]=inp.value;
+        }
+      }
+    });
+    cc.querySelectorAll('input[type=text]').forEach(inp=>{ if((inp.getAttribute('onchange')||'').includes("'label'")) c.label=inp.value; });
+    cc.querySelectorAll('input[type=color]').forEach(inp=>{ if((inp.getAttribute('onchange')||'').includes("'color'")&&inp.value) c.color=inp.value; });
+  });
+}
 
 // ═══════════════════════════════════════════════════════════════
-// 2D DRAW
+// CALCULATE
 // ═══════════════════════════════════════════════════════════════
-// ── Orientation colour coding (per spec image)
-// Orientation A (0°)  = Blue  #2E6DB4
-// Orientation B (90°) = Red   #C0392B
-// These are FIXED colours per the specification — not derived from case colour.
-const ORI_COLOR_A = '#2E6DB4';  // Blue — Orientation A (0°)
-const ORI_COLOR_B = '#C0392B';  // Red  — Orientation B (90°)
+function calculate(){
+  _syncInputsToST();
+  const valid=ST.cases.filter(c=>cv(c.w)>0&&cv(c.l)>0&&cv(c.h)>0);
+  if(!valid.length) return;
+  const pal=PALLETS[ST.palletKey],pW=pal.w,pL=pal.l,pH=pal.h;
+  const rawMaxH=parseFloat(ST.maxH);
+  const hasMaxH=ST.maxH!==''&&ST.maxH!==undefined&&ST.maxH!==null&&rawMaxH>0&&isFinite(rawMaxH);
+  const maxHin=hasMaxH?cv(ST.maxH):Infinity;
+  document.getElementById('ph').style.display='none';
+  LE.sideView=null;
+
+  if(valid.length===1){
+    ST.multiMode=false;
+    // interlockMode preserved across single-case recalculates
+    const c=valid[0],cW=cv(c.w),cL=cv(c.l),cH=cv(c.h);
+    const trailerH=TRK&&TRK.dims?TRK.dims.H:110;
+    const effectiveMaxH=hasMaxH?maxHin:trailerH;
+    const maxL=cH>0?Math.max(1,Math.floor((effectiveMaxH-pH)/cH)):1;
+    ST.layers=maxL;
+    ST.patterns=buildPatterns(cW,cL,pW,pL);
+    ST.layerStack=[];
+    applyMultiCaseMix(ST.patterns,valid);
+    if(ST.selPat>=ST.patterns.length) ST.selPat=0;
+    if(!ST._preserveEdits){
+      ST.layerEdits={};ST._patEdits={};
+      ST._patModified=new Set();
+      LE.selectedSet.clear();LE.activeMode=null;
+    }
+    ST._preserveEdits=false;
+    if(ST.patterns.length>0){
+      const b=ST.patterns[ST.selPat];
+      const tH=r2(pH+cH*maxL);
+      const plsA0=b.placements||[];
+      const initMxX=plsA0.length?Math.max(...plsA0.map(p=>p.x+p.w)):pW;
+      const initMxY=plsA0.length?Math.max(...plsA0.map(p=>p.y+p.l)):pL;
+      const initMnX=plsA0.length?Math.min(...plsA0.map(p=>p.x)):0;
+      const initMnY=plsA0.length?Math.min(...plsA0.map(p=>p.y)):0;
+      const ohIn2=ST.isMetric?(parseFloat(ST.maxOverhang)||0)/25.4:(parseFloat(ST.maxOverhang)||0);
+      const wdA=b.wdA||weightDistScore(b.placements,pW,pL);
+      const wdB=b.placementsB?b.wdB||weightDistScore(b.placementsB,pW,pL):wdA;
+      ST.stats={
+        palW:dp(pW),palL:dp(pL),palH:dp(pH),totalH:dp(tH),
+        ovW:dp(b.ohW),ovL:dp(b.ohL),
+        TI:b.TI,HI:maxL,caseCount:b.TI*maxL,perLayer:b.TI,layers:maxL,
+        cubicEff:b.cubicEff,palUtilPct:b.cubicEff,
+        stability:b.stability,interlockPct:b.interlockPct||0,
+        caseSupportPct:b.caseSupportPct,minCaseSupport:b.minCaseSupport,
+        patName:b.name,alternating:!!(b.placementsB&&b.placementsB!==b.placements),
+        _cH:cH,_cW:cW,_cL:cL,
+        unitLoadW_in:initMxX-initMnX,unitLoadL_in:initMxY-initMnY,
+        caseStackH_in:cH*maxL,
+        unitLoadW:dp(initMxX-initMnX),unitLoadL:dp(initMxY-initMnY),
+        overLimit:hasMaxH&&tH>maxHin,
+        ohUnsafe:Math.abs(b.ohW)>ohIn2+0.01||Math.abs(b.ohL)>ohIn2+0.01,
+        weightDist:r2((wdA+wdB)/2),
+        TI_B:b.placementsB&&b.placementsB!==b.placements?b.placementsB.length:b.TI,
+      };
+    }
+  } else {
+    // ── MULTI-CASE MODE ───────────────────────────────────────────────
+    ST.multiMode=false;
+    ST.interlockMode = false; // interlock not applicable for multi-case
+    const c0=valid[0],cH0=cv(c0.h);
+    const trailerH2=TRK&&TRK.dims?TRK.dims.H:110;
+    const effectiveMaxH2=hasMaxH?maxHin:trailerH2;
+    const maxL2=cH0>0?Math.max(1,Math.floor((effectiveMaxH2-pH)/cH0)):1;
+    ST.layers=maxL2;
+    ST.layerStack=[];
+    ST.patterns=[{
+      name:'Manual Build',
+      desc:'Multi-case manual layout. Add cases to each layer using the Layer Stack panel.',
+      orientDesc:'Manual',
+      placements:[],placementsB:null,
+      count:0,TI:0,TI_B:0,
+      ohW:0,ohL:0,cubicEff:0,palUtilPct:0,
+      caseSupportPct:0,minCaseSupport:0,
+      stability:0,interlockPct:0,
+      orisA:'—',orisB:'—',
+      zoneW:pW,zoneL:pL,ohIn:0,
+      wdA:0,wdB:0,masterW:dp(pW),masterL:dp(pL),
+      multiCaseManual:true,
+    }];
+    ST.selPat=0;
+    if(!ST._preserveEdits){
+      ST.layerEdits={};ST._patEdits={};
+      ST._patModified=new Set();
+      LE.selectedSet.clear();LE.activeMode=null;
+    }
+    ST._preserveEdits=false;
+    const tH2=r2(pH+cH0*maxL2);
+    ST.stats={
+      palW:dp(pW),palL:dp(pL),palH:dp(pH),totalH:dp(tH2),
+      ovW:'0',ovL:'0',
+      TI:0,HI:maxL2,caseCount:0,perLayer:0,layers:maxL2,
+      cubicEff:'0',palUtilPct:0,stability:0,interlockPct:0,
+      patName:'Manual Build',alternating:false,
+      _cH:cH0,_cW:cv(c0.w),_cL:cv(c0.l),
+      unitLoadW_in:pW,unitLoadL_in:pL,caseStackH_in:cH0*maxL2,
+      unitLoadW:dp(pW),unitLoadL:dp(pL),
+      multiCase:true,caseCount_mc:valid.length,multiCaseManual:true,
+    };
+  }
+
+  renderSlipSheetUI();
+  if(ST.stats){
+    const sb=document.getElementById('statsBox');
+    if(sb) sb.style.display='block';
+  }
+  // Force pattern table visible immediately
+  const _tw=document.getElementById('tw');
+  if(_tw && ST.patterns && ST.patterns.length) _tw.style.display='block';
+  // Render each section directly with individual error isolation
+  try{ renderStats(); }catch(e){ console.error('[renderStats]',e); }
+  try{ renderTable(); }catch(e){ console.error('[renderTable]',e); }
+  try{ renderCaseBreakdownPanel(); }catch(e){ console.error('[breakdown]',e); }
+  try{ renderLayerStack(); }catch(e){}
+  leInitCanvas();
+  leUpdateBar();
+  if(ST.view==='2d'){ try{ draw2D(); }catch(e){ console.error('[draw2D]',e); } }
+  else if(ST.view==='3d'){ initTHR(); try{ build3D(); }catch(e){} }
+  if(typeof trkUpdateStackButtons==='function') trkUpdateStackButtons();
+  if(typeof trkGenerate==='function') trkGenerate();
+}
+
+
+// ── Interlock Mode Toggle ──────────────────────────────────────────────
+function toggleInterlockMode(){
+  ST.interlockMode = !ST.interlockMode;
+  leUpdateInterlockBtn();
+  draw2D();
+  if(ST.view==='3d') build3D();
+  if(ST.stats) { try{ renderStats(); }catch(e){} }
+}
+function leUpdateInterlockBtn(){
+  const btn = document.getElementById('interlockBtn');
+  if(!btn) return;
+  // Show only in 2D view, single-case, when patterns exist
+  const isSingle = ST.stats && !ST.stats.multiCaseManual && !ST.stats.multiCase;
+  const show = (ST.view==='2d' || ST.view==='3d') && isSingle && ST.patterns && ST.patterns.length > 0;
+  btn.style.display = show ? 'inline-block' : 'none';
+  if(ST.interlockMode){
+    btn.textContent = '🔄 INTERLOCK ON';
+    btn.style.background = '#1a3520';
+    btn.style.color = '#5ec97a';
+    btn.style.borderColor = '#2a6040';
+  } else {
+    btn.textContent = '🔄 INTERLOCK OFF';
+    btn.style.background = '#1a2535';
+    btn.style.color = '#7ac8ff';
+    btn.style.borderColor = '#2a4060';
+  }
+}
+
+// ── Library availability check ────────────────────────────────────────
+function _checkLibraries(){
+  if(typeof THREE==='undefined') console.warn('Three.js not loaded');
+  if(typeof jspdf==='undefined'&&(typeof window==='undefined'||typeof window.jspdf==='undefined')) console.warn('jsPDF not loaded');
+  if(typeof XLSX==='undefined') console.warn('SheetJS not loaded');
+}
+
+function renderSlipSheetUI(){
+  const ui = document.getElementById('ssUI');
+  if(!ui) return;
+  if(!ST.slipSheets || !ST.stats){
+    ui.style.display = 'none';
+    return;
+  }
+  ui.style.display = 'block';
+  const HI = ST.stats.HI || ST.stats.layers || 1;
+  if(!ST.slipSheetLayers) ST.slipSheetLayers = [];
+  const thick = ST.slipSheetThickness || 0.04; // default ~1mm
+  const thickDisp = ST.isMetric ? r2(thick*25.4)+' mm' : r2(thick)+'"';
+  let html = `<div style="font-size:10px;color:var(--dm);margin-bottom:4px;">
+    Thickness: <input type="number" value="${ST.isMetric?r2(thick*25.4):r2(thick)}"
+      min="0" step="${ST.isMetric?0.5:0.01}" style="width:55px;"
+      oninput="ST.slipSheetThickness=${ST.isMetric?'(parseFloat(this.value)||0)/25.4':'parseFloat(this.value)||0'};if(ST.stats)renderStats()"/>
+    ${ST.isMetric?'mm':'"'}
+  </div>
+  <div style="font-size:10px;color:var(--dm);margin-bottom:3px;">Select layers (0=base, ${HI}=top):</div>
+  <div style="display:flex;flex-wrap:wrap;gap:4px;">`;
+  for(let i=0; i<=HI; i++){
+    const checked = ST.slipSheetLayers.includes(i);
+    const lbl = i===0?'Base':i===HI?'Top':`L${i}`;
+    html += `<label style="font-size:10px;cursor:pointer;display:flex;align-items:center;gap:2px;">
+      <input type="checkbox" ${checked?'checked':''} onchange="
+        if(this.checked){if(!ST.slipSheetLayers.includes(${i}))ST.slipSheetLayers.push(${i});}
+        else{ST.slipSheetLayers=ST.slipSheetLayers.filter(n=>n!==${i});}
+        if(ST.stats)renderStats();" style="cursor:pointer;"/>
+      ${lbl}</label>`;
+  }
+  html += '</div>';
+  ui.innerHTML = html;
+}
+
+
 
 // ── Apply multi-case color mix to placements ─────────────────────────
 // After patterns are built from primary case dims, stamp each placement
@@ -2682,6 +3038,7 @@ function leSelectLayerIdx(idx){
 }
 
 function leUpdateBar() {
+  leUpdateInterlockBtn();
   leRenderCasePalette();
   // Show layer stack only in 2D view when stats exist
   const lsp = document.getElementById('layerStackPanel');
@@ -4910,12 +5267,17 @@ function capture2DLayer(layer){
   ctx.lineWidth   = 1.5;
   ctx.strokeRect(ox, oy, pW*sc, pL*sc);
 
-  // Get placements for the requested layer
-  const isLayerB = (layer === 'B');
+  // Get placements for the requested layer — use numeric keys (0=LayerA, 1=LayerB)
+  const layerIdx = (layer === 'B' || layer === '1') ? 1 : 0;
   const pls = (() => {
+    // Check numeric key first (current storage format)
+    if(ST.layerEdits && ST.layerEdits[String(layerIdx)] !== undefined)
+      return ST.layerEdits[String(layerIdx)];
+    // Fall back to legacy string keys
     if(ST.layerEdits && ST.layerEdits[layer] && ST.layerEdits[layer].length)
       return ST.layerEdits[layer];
-    if(isLayerB && pat.placementsB && pat.placements !== pat.placementsB)
+    // Fall back to pattern placements
+    if(layerIdx === 1 && pat.placementsB && pat.placements !== pat.placementsB)
       return pat.placementsB;
     return pat.placements || [];
   })();
@@ -5695,14 +6057,15 @@ function renderAll(){
   try{ renderTable(); }catch(e){ console.error('[renderTable]',e); }
   try{ renderCaseBreakdownPanel(); }catch(e){ console.error('[caseBreakdown]',e); }
   const sn=document.getElementById('selName');
-  if(!ST.multiMode&&ST.patterns.length>0){
-    const p=ST.patterns[ST.selPat];
-    const alt=p&&p.placementsB?' [ALT]':'';
-    if(p) sn.textContent=`${p.name}${alt}  TI:${p.TI||p.count}  Stab:${p.stability}%  Util:${p.cubicEff}%`;
-  } else {
-    sn.textContent='';
+  if(sn){
+    if(!ST.multiMode&&ST.patterns.length>0){
+      const p=ST.patterns[ST.selPat];
+      if(p){
+        const alt=p&&p.placementsB?' [ALT]':'';
+        sn.textContent=`${p.name}${alt}  TI:${p.TI||p.count}  Stab:${p.stability}%  Util:${p.cubicEff}%`;
+      }
+    } else { sn.textContent=''; }
   }
-  // Always ensure we're showing 2D after a fresh calculate
   if(ST.view==='2d'){
     leUpdateBar();
     try{ draw2D(); }catch(e){ console.error('[draw2D]',e); }
@@ -5742,6 +6105,7 @@ function getCaseBreakdown(){
 // ── Case breakdown panel (below case list in sidebar) ─────────────
 // Shows per-case quantities automatically whenever layers are edited.
 function renderCaseBreakdownPanel(){
+  const panel = document.getElementById('caseBreakdownPanel');
   if(!panel) return;
   if(!ST.stats || !ST.stats.multiCaseManual){
     panel.style.display = 'none';
@@ -6067,13 +6431,9 @@ const _suppV = caseSupportPct(plsA, pal.w, pal.l, eoin, HI, plsB2);
                style="background:transparent;border:none;color:#c0392b;font-size:9px;cursor:pointer;padding:0 2px;line-height:1;">✕</button>
            </div>
          </td>`
-      : p.aiGenerated
-      ? `<td style="color:#a78bfa;font-weight:bold">
-           <span style="font-size:7px;background:rgba(167,139,250,.18);border:1px solid rgba(167,139,250,.4);color:#a78bfa;border-radius:2px;padding:0 3px;margin-right:3px;vertical-align:middle;">✦ AI</span>${p.name.replace(/^AI-\d+:\s*/,'')}${hasEdits&&!isSelected?' <span style="font-size:7px;color:#FFB74D;">✎</span>':''}
-         </td>`
       : `<td style="color:${hasEdits&&!isSelected?'#FFB74D':'var(--go)'};font-weight:bold">${p.name}${hasEdits&&!isSelected?' <span style="font-size:7px;color:#FFB74D;">✎</span>':''}</td>`;
 
-    return `<tr class="${isSelected?'selr':''}"${rowStyle} onclick="selPt(${i})" title="${p.desc||''}">
+    return `<tr id="patRow_${i}" class="${isSelected?'selr':''}"${rowStyle} onclick="selPt(${i})" title="${p.desc||''}">
       <td style="color:var(--dm)">${i+1}</td>
       ${nameCell}
       <td id="patTI_${i}" style="overflow:visible;">${tiDisplay}</td>
@@ -6231,6 +6591,7 @@ function setView(v){
   const maxHBtn = document.getElementById('maxHToggleBtn');
   if(dimBtn)  dimBtn.style.display  = show3D ? 'inline-block' : 'none';
   if(maxHBtn) maxHBtn.style.display = show3D ? 'inline-block' : 'none';
+  leUpdateInterlockBtn(); // show in 2D and 3D
   if(v!=='3d'){
     const overlay=document.getElementById('dim3DOverlay');
     if(overlay) overlay.style.display='none';
@@ -7162,6 +7523,21 @@ document.addEventListener('keydown', e=>{
   }
   if((e.ctrlKey||e.metaKey) && e.shiftKey && (e.key==='s'||e.key==='S')){
     e.preventDefault(); mnuSaveAs();
+  }
+  // Up/Down arrows navigate pattern list (when not focused in an input)
+  const tag = (e.target||{}).tagName||'';
+  if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT') return;
+  if(!ST.patterns||!ST.patterns.length) return;
+  if(e.key==='ArrowUp'||e.key==='ArrowDown'){
+    e.preventDefault();
+    const dir = e.key==='ArrowUp' ? -1 : 1;
+    const next = Math.max(0, Math.min(ST.patterns.length-1, ST.selPat + dir));
+    if(next !== ST.selPat){
+      selPt(next);
+      // Scroll selected row into view in the pattern table
+      const row = document.getElementById('patRow_'+next);
+      if(row) row.scrollIntoView({block:'nearest',behavior:'smooth'});
+    }
   }
 });
 
@@ -8461,6 +8837,7 @@ setView = function(v){
   // Layer stack panel: only in 2D mode
   const lsp = document.getElementById('layerStackPanel');
   if(lsp) lsp.style.display = (v==='2d' && ST.stats) ? 'block' : 'none';
+  leUpdateInterlockBtn();
   if(v==='report'){
     document.getElementById('c2d').style.display='none';
     document.getElementById('c3d').style.display='none';
@@ -8596,7 +8973,15 @@ function setRptZoom(dir){
 // ── INIT
 renderPalletBtns();
 renderCaseList();
-window.addEventListener('load', _checkLibraries);
+// Set initial view and wire up canvas listeners immediately
+(function init(){
+  setView('2d');          // show 2D canvas, hide others, wire view buttons
+  leInitCanvas();         // attach mouse/keyboard listeners to canvas
+  window.addEventListener('load', ()=>{
+    _checkLibraries();
+    initTHR();            // initialize Three.js renderer so 3D is ready
+  });
+})();
 </script>
 </body>
 </html>
