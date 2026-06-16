@@ -4,7 +4,7 @@ const STACK_BLURB =
   "Knapp-Built Stack\u2122 is advanced pallet pattern creation software designed to help packaging engineers develop optimized pallet configurations faster and more efficiently. The platform enables users to create standard and mixed-case pallet patterns, utilize multiple case sizes on a single pallet, customize pallet footprints, and optimize trailer loading configurations\u2014all within an intuitive engineering-focused environment.";
 
 const MACHINES_BLURB =
-  "Custom agricultural packaging & vegetable processing equipment. Hammonton, NJ. Founded 2008 by John & Brandon Knapp.";
+  "Custom agricultural packaging & vegetable processing equipment. Hammonton, NJ. Founded 2008.";
 
 export default function Footer({ variant = "machines" }: { variant?: "machines" | "stack" }) {
   const isStack = variant === "stack";
@@ -29,8 +29,9 @@ export default function Footer({ variant = "machines" }: { variant?: "machines" 
         </div>
       </div>
       <div className="mx-auto mt-8 max-w-6xl border-t border-ink-700 pt-4 text-xs text-zinc-500">
-        © {new Date().getFullYear()} Knapp-Built Machines. All rights reserved. knappbuiltmachines.com
+        &copy; {new Date().getFullYear()} Knapp-Built Machines. All rights reserved. knappbuiltmachines.com
       </div>
     </footer>
   );
 }
+
