@@ -7,22 +7,22 @@ const values = [
   {
     t: "Custom Design",
     d: "Crafting specialized equipment tailored to meet unique customer requirements, custom equipment design ensures optimal performance and functionality. This approach allows for innovation and adaptability, resulting in solutions that precisely fit the needs of each project.",
-    i: "▦",
+    i: "\u25a6",
   },
   {
     t: "High Quality",
     d: "Emphasizing excellence, high-quality products undergo rigorous testing and adhere to stringent standards. This commitment to quality ensures reliability, durability, and customer satisfaction, making them a trusted choice for any application.",
-    i: "✦",
+    i: "\u2726",
   },
   {
     t: "Quick Lead Times",
     d: "Prioritizing efficiency, quick lead times mean faster delivery of products and services without compromising quality. This approach helps businesses stay competitive by reducing downtime and meeting urgent demands.",
-    i: "⚡",
+    i: "\u26a1",
   },
   {
     t: "Fair Pricing",
     d: "Offering competitive and transparent pricing, fair pricing ensures that customers receive value for their investment. It fosters trust and long-term relationships by balancing cost-effectiveness with the quality and service provided.",
-    i: "◈",
+    i: "\u25c8",
   },
 ];
 
@@ -44,7 +44,7 @@ export default function Home() {
           <div className="relative mx-auto grid max-w-6xl items-center gap-10 px-5 py-20 md:grid-cols-2">
             <div>
               <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber">
-                Hammonton, New Jersey · Est. 2008
+                Hammonton, New Jersey &middot; Est. 2008
               </p>
               <h1 className="mt-5 text-5xl font-bold uppercase leading-[1.02] text-white md:text-6xl">
                 Knapp-Built <span className="text-amber">Machines</span>
@@ -71,21 +71,21 @@ export default function Home() {
         {/* WHO WE ARE */}
         <section className="border-b border-ink-700 px-5 py-20">
           <div className="mx-auto grid max-w-6xl items-center gap-12 md:grid-cols-2">
-            <div className="relative aspect-[4/5] overflow-hidden rounded-lg border border-ink-500 md:order-2">
-              <Image src="/photos/founders.jpg" alt="The Knapp family outside the Knapp-Built Machines shop" fill sizes="(max-width:768px) 100vw, 50vw" className="object-cover" />
+            <div className="relative aspect-[4/3] overflow-hidden rounded-lg border border-ink-500 md:order-2">
+              <Image src="/photos/about-field.jpg" alt="Knapp-Built harvesting equipment working in a South Jersey field" fill sizes="(max-width:768px) 100vw, 50vw" className="object-cover" />
             </div>
             <div className="md:order-1">
               <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber">Who We Are</p>
-              <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">A father-son shop</h2>
+              <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">A family-owned shop</h2>
               <p className="mt-5 text-zinc-300 leading-relaxed">
-                Knapp-Built Machines, founded in 2008 by the father-son duo John and
-                Brandon Knapp, is based in Hammonton, New Jersey. Specializing in custom
-                agricultural packaging and vegetable processing equipment, the company
-                caters to the local agriculture industry and farmers.
+                Knapp-Built Machines, founded in 2008, is based in Hammonton, New
+                Jersey. Specializing in custom agricultural packaging and vegetable
+                processing equipment, the company caters to the local agriculture industry
+                and farmers.
               </p>
               <p className="mt-4 text-zinc-300 leading-relaxed">
                 Knapp-Built Machines prides itself on providing high-quality products,
-                quick lead times, and fair pricing — ensuring customer satisfaction and
+                quick lead times, and fair pricing &mdash; ensuring customer satisfaction and
                 loyalty.
               </p>
             </div>
@@ -115,7 +115,7 @@ export default function Home() {
             <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber">Our Work</p>
             <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">Equipment from the shop floor</h2>
             <p className="mt-3 max-w-2xl text-zinc-400">
-              Conveyors, roller tables, and processing lines — fabricated in stainless and
+              Conveyors, roller tables, and processing lines &mdash; fabricated in stainless and
               built to run in real packing operations.
             </p>
             <div className="mt-10 grid gap-5 sm:grid-cols-2">
@@ -139,7 +139,7 @@ export default function Home() {
               <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">For the people who grow our food</h2>
               <p className="mt-5 text-zinc-300 leading-relaxed">
                 From the fields of South Jersey to the packing house, our equipment is
-                designed around the realities of the harvest — the crops, the pace, and the
+                designed around the realities of the harvest &mdash; the crops, the pace, and the
                 people who bring them in.
               </p>
             </div>
@@ -159,10 +159,10 @@ export default function Home() {
           <div className="mx-auto max-w-6xl rounded-lg border border-amber/50 bg-amber/5 p-8 md:p-12">
             <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber">A Separate Product</p>
             <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">
-              Knapp-Built Stack<span className="align-super text-base">™</span>
+              Knapp-Built Stack<span className="align-super text-base">&trade;</span>
             </h2>
             <p className="mt-4 max-w-2xl text-zinc-300">
-              Our pallet pattern creator software — a standalone tool built for packaging
+              Our pallet pattern creator software &mdash; a standalone tool built for packaging
               engineers who need more customization than the usual options allow.
             </p>
             <Link href="/software" className="mt-6 inline-block rounded bg-amber px-8 py-3.5 font-semibold uppercase tracking-wide text-ink-950 transition hover:bg-amber-light">
@@ -175,3 +175,4 @@ export default function Home() {
     </>
   );
 }
+
