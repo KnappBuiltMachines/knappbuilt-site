@@ -47,7 +47,7 @@ export default function SignupPage() {
       <main className="flex-1 bg-blueprint px-5 py-20">
         <div className="mx-auto w-full max-w-md rounded-lg border border-ink-500 bg-ink-800 p-8">
           <h1 className="text-2xl font-bold text-white">Create your account</h1>
-          <p className="mt-1 text-sm text-zinc-400">Start your 7-day free trial ‚Äî no credit card required.</p>
+          <p className="mt-1 text-sm text-zinc-400">Start your 7-day free trial &mdash; no credit card required.</p>
           {done ? (
             <div className="mt-6 rounded border border-amber/50 bg-amber/10 p-4 text-sm text-amber">
               Check your email to confirm your account, then come back and{" "}
@@ -72,7 +72,7 @@ export default function SignupPage() {
               </div>
               {err && <p className="text-sm text-red-400">{err}</p>}
               <button disabled={loading} className="w-full rounded bg-amber py-3 font-semibold uppercase tracking-wide text-ink-950 hover:bg-amber-light disabled:opacity-60">
-                {loading ? "Creating‚Ä¶" : "Sign Up"}
+                {loading ? "Creating\u2026" : "Sign Up"}
               </button>
             </form>
           )}
