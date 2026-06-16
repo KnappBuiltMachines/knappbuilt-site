@@ -143,13 +143,8 @@ export default function Home() {
                 people who bring them in.
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-ink-500">
-                <Image src="/photos/field-cucumber.jpg" alt="A grower in a South Jersey vegetable field" fill sizes="(max-width:768px) 50vw, 25vw" className="object-cover" />
-              </div>
-              <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-ink-500">
-                <Image src="/photos/field-corn.jpg" alt="In the cornfield at harvest time" fill sizes="(max-width:768px) 50vw, 25vw" className="object-cover" />
-              </div>
+            <div className="relative aspect-[4/3] overflow-hidden rounded-lg border border-ink-500">
+              <Image src="/photos/farm-aerial.jpg" alt="Aerial view of South Jersey farmland" fill sizes="(max-width:768px) 100vw, 50vw" className="object-cover" />
             </div>
           </div>
         </section>
