@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getAccess } from "@/lib/subscription";
 
-export const metadata = { title: "Pallet Pattern Creator ‚Äî Knapp-Built Stack" };
+export const metadata = { title: "Pallet Pattern Creator \u2014 Knapp-Built Stack" };
 
 export default async function Builder() {
   const supabase = await createClient();
@@ -17,7 +17,7 @@ export default async function Builder() {
     <div className="flex h-screen flex-col bg-ink-950">
       <div className="flex items-center justify-between border-b-2 border-amber bg-ink-950 px-4 py-2">
         <Link href="/" className="font-display text-sm uppercase tracking-widest text-amber">
-          ‚Üê Knapp-Built Stack
+          &larr; Knapp-Built Stack
         </Link>
         <Link href="/account" className="text-xs uppercase tracking-widest text-zinc-400 hover:text-amber">
           Account
@@ -27,10 +27,10 @@ export default async function Builder() {
       {access.reason === "trial" && (
         <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-amber/40 bg-amber/10 px-4 py-2 text-center text-sm text-amber">
           <span>
-            Free trial ‚Äî <strong>{access.trialDaysLeft} day{access.trialDaysLeft === 1 ? "" : "s"} left</strong>. No card on file yet.
+            Free trial &mdash; <strong>{access.trialDaysLeft} day{access.trialDaysLeft === 1 ? "" : "s"} left</strong>. No card on file yet.
           </span>
           <Link href="/pricing" className="font-semibold underline hover:text-amber-light">
-            Subscribe to keep access ‚Üí
+            Subscribe to keep access &rarr;
           </Link>
         </div>
       )}
