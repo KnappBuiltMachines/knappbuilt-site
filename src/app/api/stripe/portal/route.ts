@@ -7,27 +7,34 @@ import { SITE } from "@/lib/config";
 export const runtime = "nodejs";
 
 export async function POST() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
 
-  const admin = createAdminClient();
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("stripe_customer_id")
-    .eq("id", user.id)
-    .single();
+    const admin = createAdminClient();
+    const { data: profile, error: dbError } = await admin
+      .from("profiles")
+      .select("stripe_customer_id")
+      .eq("id", user.id)
+      .single();
 
-  if (!profile?.stripe_customer_id) {
-    return NextResponse.json({ error: "No Stripe customer" }, { status: 400 });
+    if (dbError) {
+      console.error("portal: profile lookup failed:", dbError.message);
+      return NextResponse.json({ error: "Could not load your billing profile." }, { status: 500 });
+    }
+    if (!profile?.stripe_customer_id) {
+      return NextResponse.json({ error: "No billing account is linked to this login yet." }, { status: 400 });
+    }
+
+    const portal = await stripe.billingPortal.sessions.create({
+      customer: profile.stripe_customer_id,
+      return_url: `${SITE.url}/account`,
+    });
+    return NextResponse.json({ url: portal.url });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error opening billing portal.";
+    console.error("portal error:", message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const portal = await stripe.billingPortal.sessions.create({
-    customer: profile.stripe_customer_id,
-    return_url: `${SITE.url}/account`,
-  });
-
-  return NextResponse.json({ url: portal.url });
 }
