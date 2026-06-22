@@ -7,8 +7,6 @@ const LINKS = [
   { href: "/about", label: "About" },
   { href: "/equipment", label: "Equipment" },
   { href: "/services", label: "Services" },
-  { href: "/software", label: "Stack Software" },
-  { href: "/pricing", label: "Pricing" },
   { href: "/contact", label: "Contact" },
 ];
 
@@ -24,11 +22,8 @@ export default function Navbar({ logo = "machines" }: { logo?: "machines" | "sta
               {l.label}
             </Link>
           ))}
-          <Link href="/login" className="text-sm uppercase tracking-wide text-zinc-200 transition hover:text-amber">
-            Login
-          </Link>
-          <Link href="/pricing" className="rounded bg-amber px-4 py-2 text-sm font-semibold uppercase tracking-wide text-ink-950 transition hover:bg-amber-light">
-            Get Access
+          <Link href="/contact" className="rounded bg-amber px-4 py-2 text-sm font-semibold uppercase tracking-wide text-ink-950 transition hover:bg-amber-light">
+            Contact Us
           </Link>
         </div>
         <button onClick={() => setOpen(!open)} className="lg:hidden text-amber" aria-label="Menu">
@@ -44,9 +39,8 @@ export default function Navbar({ logo = "machines" }: { logo?: "machines" | "sta
               {l.label}
             </Link>
           ))}
-          <div className="mt-2 flex gap-3 border-t border-ink-600 pt-3">
-            <Link href="/login" onClick={() => setOpen(false)} className="flex-1 rounded border border-ink-500 py-2 text-center text-sm uppercase text-zinc-200">Login</Link>
-            <Link href="/pricing" onClick={() => setOpen(false)} className="flex-1 rounded bg-amber py-2 text-center text-sm font-semibold uppercase text-ink-950">Get Access</Link>
+          <div className="mt-2 border-t border-ink-600 pt-3">
+            <Link href="/contact" onClick={() => setOpen(false)} className="block rounded bg-amber py-2 text-center text-sm font-semibold uppercase text-ink-950">Contact Us</Link>
           </div>
         </div>
       )}
