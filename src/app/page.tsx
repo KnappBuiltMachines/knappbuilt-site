@@ -148,26 +148,8 @@ export default function Home() {
             </div>
           </div>
         </section>
-
-        {/* KNAPP-BUILT STACK CALLOUT */}
-        <section className="px-5 py-20">
-          <div className="mx-auto max-w-6xl rounded-lg border border-amber/50 bg-amber/5 p-8 md:p-12">
-            <p className="font-mono text-xs uppercase tracking-[0.3em] text-amber">A Separate Product</p>
-            <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">
-              Knapp-Built Stack<span className="align-super text-base">&trade;</span>
-            </h2>
-            <p className="mt-4 max-w-2xl text-zinc-300">
-              Our pallet pattern creator software &mdash; a standalone tool built for packaging
-              engineers who need more customization than the usual options allow.
-            </p>
-            <Link href="/software" className="mt-6 inline-block rounded bg-amber px-8 py-3.5 font-semibold uppercase tracking-wide text-ink-950 transition hover:bg-amber-light">
-              Learn More
-            </Link>
-          </div>
-        </section>
       </main>
       <Footer />
     </>
   );
 }
-
