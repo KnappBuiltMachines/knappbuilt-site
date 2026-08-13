@@ -4,7 +4,7 @@ import PageShell from "@/components/PageShell";
 import { SITE } from "@/lib/config";
 
 const CONTACT_EMAIL = "knapp-built@hotmail.com";
-const CONTACT_PHONE = "609.217.7869";
+const CONTACT_PHONE = "609.214.8764";
 
 export default function Contact() {
   const [name, setName] = useState("");
