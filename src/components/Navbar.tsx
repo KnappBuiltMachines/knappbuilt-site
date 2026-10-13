@@ -7,7 +7,6 @@ const LINKS = [
   { href: "/about", label: "About" },
   { href: "/equipment", label: "Equipment" },
   { href: "/services", label: "Services" },
-  { href: "/contact", label: "Contact" },
 ];
 
 export default function Navbar({ logo = "machines" }: { logo?: "machines" | "stack" }) {

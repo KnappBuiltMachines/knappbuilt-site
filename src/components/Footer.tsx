@@ -16,7 +16,7 @@ export default function Footer({ variant = "machines" }: { variant?: "machines" 
           <Link href="/about" className="hover:text-amber">About</Link>
           <Link href="/equipment" className="hover:text-amber">Equipment</Link>
           <Link href="/services" className="hover:text-amber">Services</Link>
-          <Link href="/contact" className="hover:text-amber">Contact</Link>
+          <Link href="/contact" className="hover:text-amber">Contact Us</Link>
         </div>
       </div>
       <div className="mx-auto mt-8 max-w-6xl border-t border-ink-700 pt-4 text-xs text-zinc-500">
