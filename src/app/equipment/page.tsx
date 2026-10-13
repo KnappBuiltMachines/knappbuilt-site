@@ -31,7 +31,7 @@ const items: { name: string; img: string; desc: string }[] = [
   },
   {
     name: "Custom Fabrication",
-    img: "",
+    img: "/equipment/custom-fabrication.jpg",
     desc: "Have something specific in mind? We design and build custom stainless equipment engineered to your operation, footprint, and throughput.",
   },
 ];
