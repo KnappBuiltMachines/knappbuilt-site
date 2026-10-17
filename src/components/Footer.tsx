@@ -1,26 +1,46 @@
 import Link from "next/link";
+import { CONTACT } from "@/lib/contact";
+import { EQUIPMENT } from "@/lib/equipment";
 
-const MACHINES_BLURB =
-  "Custom agricultural packaging & vegetable processing equipment. Hammonton, NJ. Founded 2008.";
-
-export default function Footer({ variant = "machines" }: { variant?: "machines" | "stack" }) {
-  void variant;
+export default function Footer() {
   return (
-    <footer className="mt-auto border-t-2 border-amber bg-ink-950 px-5 py-10 text-sm text-zinc-400">
-      <div className="mx-auto flex max-w-6xl flex-col gap-6 md:flex-row md:justify-between">
-        <div className="max-w-md">
-          <div className="font-display text-lg tracking-wide text-amber">Knapp-Built Machines</div>
-          <p className="mt-2">{MACHINES_BLURB}</p>
+    <footer className="kb-footer">
+      <div className="kb-container">
+        <div className="kb-footer-grid">
+          <div>
+            <Link href="/" className="kb-brand" aria-label="Knapp-Built Machines home">
+              <img src="/mark.png" alt="" width={38} height={38} />
+              <span className="kb-brand-name">Knapp-Built <b>Machines</b></span>
+            </Link>
+            <p>
+              Custom agricultural packaging and vegetable processing equipment, designed,
+              built, and serviced in Hammonton, NJ. Family-owned since 2008.
+            </p>
+            <p>
+              <a href={CONTACT.phoneHref} className="kb-textlink">{CONTACT.phone}</a>
+              <br />
+              <a href={`mailto:${CONTACT.email}`} className="hover:text-white">{CONTACT.email}</a>
+            </p>
+          </div>
+          <div className="kb-footer-links">
+            <h4>Equipment</h4>
+            {EQUIPMENT.map((e) => (
+              <Link key={e.slug} href={`/equipment#${e.slug}`}>{e.name}</Link>
+            ))}
+          </div>
+          <div className="kb-footer-links">
+            <h4>Company</h4>
+            <Link href="/">Home</Link>
+            <Link href="/services">Services</Link>
+            <Link href="/about">About</Link>
+            <Link href="/contact">Contact</Link>
+            <Link href="/contact">Request a Quote</Link>
+          </div>
         </div>
-        <div className="grid grid-cols-2 gap-x-10 gap-y-1">
-          <Link href="/about" className="hover:text-amber">About</Link>
-          <Link href="/equipment" className="hover:text-amber">Equipment</Link>
-          <Link href="/services" className="hover:text-amber">Services</Link>
-          <Link href="/contact" className="hover:text-amber">Contact Us</Link>
+        <div className="kb-footer-bottom">
+          <span>&copy; {new Date().getFullYear()} Knapp-Built Machines. All rights reserved.</span>
+          <span>Built to perform. Built to last.</span>
         </div>
-      </div>
-      <div className="mx-auto mt-8 max-w-6xl border-t border-ink-700 pt-4 text-xs text-zinc-500">
-        &copy; {new Date().getFullYear()} Knapp-Built Machines. All rights reserved. knappbuiltmachines.com
       </div>
     </footer>
   );

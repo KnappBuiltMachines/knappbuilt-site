@@ -2,37 +2,59 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: dark; }
+/* ============================================================
+   Knapp-Built Machines - global theme (Oct 2026 redesign)
+   Same design language as betselstack.com: dark engineering
+   aesthetic, amber accent, Space Grotesk display + Inter body.
+   Page-level styles live in src/app/site.css.
+   ============================================================ */
+
+:root {
+  color-scheme: dark;
+
+  --ink: #0b0c0e;
+  --ink-2: #0f1114;
+  --panel: #131619;
+  --panel-2: #181c21;
+  --line: #262a31;
+  --line-soft: #1d2127;
+
+  --amber: #fdb410;
+  --amber-soft: #ffc845;
+  --amber-deep: #d8970a;
+  --silver: #c7ccd2;
+
+  --text: #f3f5f7;
+  --muted: #9aa1ab;
+  --muted-2: #6f7682;
+
+  --display: var(--font-display), "Space Grotesk", system-ui, sans-serif;
+  --body: var(--font-body), "Inter", system-ui, sans-serif;
+
+  --container: 1160px;
+  --radius: 14px;
+  --radius-sm: 10px;
+}
 
 html { scroll-behavior: smooth; }
 
 body {
-  @apply bg-ink-900 text-zinc-100 font-body antialiased;
-  background-image: var(--tw-bg-grid, none);
+  margin: 0;
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--body);
+  font-size: 17px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* Blueprint grid backdrop */
-.bg-blueprint {
-  background-color: #1a1a1a;
-  background-image:
-    linear-gradient(rgba(245,166,35,.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(245,166,35,.04) 1px, transparent 1px);
-  background-size: 44px 44px;
+h1, h2, h3, h4 {
+  font-family: var(--display);
+  font-weight: 600;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  margin: 0;
 }
 
-h1, h2, h3, h4, .font-display {
-  font-family: var(--font-display), system-ui, sans-serif;
-  letter-spacing: -0.025em;
-}
-
-/* Corner-bracket card accents */
-.bracket { position: relative; }
-.bracket::before, .bracket::after {
-  content: ""; position: absolute; width: 14px; height: 14px;
-  border-color: #f5a623; border-style: solid; opacity: .65;
-}
-.bracket::before { top: 8px; left: 8px; border-width: 2px 0 0 2px; }
-.bracket::after { bottom: 8px; right: 8px; border-width: 0 2px 2px 0; }
-
-@keyframes rise { to { opacity: 1; transform: none; } }
-.reveal { opacity: 0; transform: translateY(14px); animation: rise .6s ease forwards; }
+::selection { background: var(--amber); color: #1a1205; }

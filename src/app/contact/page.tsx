@@ -1,88 +1,109 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import PageShell from "@/components/PageShell";
-import { SITE } from "@/lib/config";
+import { CONTACT } from "@/lib/contact";
+import { EQUIPMENT } from "@/lib/equipment";
 
-const CONTACT_EMAIL = "knapp-built@hotmail.com";
-const CONTACT_PHONE = "609.214.8764";
+const TOPICS = ["New equipment", ...EQUIPMENT.map((e) => e.name), "Service or repair", "Parts", "Something else"];
 
 export default function Contact() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [topic, setTopic] = useState(TOPICS[0]);
   const [message, setMessage] = useState("");
 
-  function sendEmail() {
+  // /contact?item=bin-washer pre-selects that machine
+  useEffect(() => {
+    const item = new URLSearchParams(window.location.search).get("item");
+    const match = EQUIPMENT.find((e) => e.slug === item);
+    if (match) setTopic(match.name);
+  }, []);
+
+  function sendEmail(ev: React.FormEvent) {
+    ev.preventDefault();
     const subject = encodeURIComponent(
-      name ? `Website inquiry from ${name}` : "Website inquiry"
+      `${topic} inquiry${name ? ` from ${name}` : ""}`
     );
-    const body = encodeURIComponent(
-      `${message}\n\n— ${name}${email ? ` (${email})` : ""}`
-    );
-    window.location.href = `mailto:${CONTACT_EMAIL}?subject=${subject}&body=${body}`;
+    const lines = [
+      message,
+      "",
+      `\u2014 ${name}`,
+      email && `Email: ${email}`,
+      phone && `Phone: ${phone}`,
+      `Topic: ${topic}`,
+    ].filter(Boolean);
+    window.location.href = `mailto:${CONTACT.email}?subject=${subject}&body=${encodeURIComponent(lines.join("\n"))}`;
   }
 
   return (
     <PageShell
       kicker="Contact"
-      title={<>Get in <span className="text-amber">touch</span></>}
-      intro={`We're based in ${SITE.city}. Reach out about equipment, service, or Stack software.`}
+      title="Let's talk about"
+      dim="your line."
+      intro={`We're based in ${CONTACT.city}. Reach out about new equipment, custom builds, service, or parts.`}
     >
-      <div className="grid gap-8 md:grid-cols-2">
-        <div className="space-y-5 text-zinc-300">
-          <div>
-            <div className="font-mono text-xs uppercase tracking-widest text-amber">Phone</div>
-            <p className="mt-1">
-              <a href={`tel:+1${CONTACT_PHONE.replace(/\./g, "")}`} className="hover:text-amber">
-                {CONTACT_PHONE}
-              </a>
-            </p>
+      <section className="kb-section" style={{ paddingTop: 24 }}>
+        <div className="kb-container kb-contact">
+          <div className="kb-info kb-stagger">
+            <a href={CONTACT.phoneHref} className="rv">
+              <span className="kb-card-icon" style={{ marginBottom: 0 }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z" /></svg>
+              </span>
+              <span><small>Call</small><strong>{CONTACT.phone}</strong></span>
+            </a>
+            <a href={`mailto:${CONTACT.email}`} className="rv">
+              <span className="kb-card-icon" style={{ marginBottom: 0 }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M22 6l-10 7L2 6" /></svg>
+              </span>
+              <span><small>Email</small><strong>{CONTACT.email}</strong></span>
+            </a>
+            <div className="kb-info-card rv">
+              <span className="kb-card-icon" style={{ marginBottom: 0 }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></svg>
+              </span>
+              <span><small>Shop</small><strong>{CONTACT.city}</strong></span>
+            </div>
           </div>
-          <div>
-            <div className="font-mono text-xs uppercase tracking-widest text-amber">Email</div>
-            <p className="mt-1">
-              <a href={`mailto:${CONTACT_EMAIL}`} className="hover:text-amber">
-                {CONTACT_EMAIL}
-              </a>
-            </p>
-          </div>
-          <div>
-            <div className="font-mono text-xs uppercase tracking-widest text-amber">Location</div>
-            <p className="mt-1">{SITE.city}</p>
-          </div>
-        </div>
 
-        <div className="bracket rounded-md border border-ink-500 bg-ink-800 p-6">
-          <label className="block text-xs uppercase tracking-widest text-zinc-400">Name</label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="mt-1 w-full rounded border border-ink-500 bg-ink-900 px-3 py-2 text-zinc-100 outline-none focus:border-amber"
-          />
-          <label className="mt-4 block text-xs uppercase tracking-widest text-zinc-400">Email</label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="mt-1 w-full rounded border border-ink-500 bg-ink-900 px-3 py-2 text-zinc-100 outline-none focus:border-amber"
-          />
-          <label className="mt-4 block text-xs uppercase tracking-widest text-zinc-400">Message</label>
-          <textarea
-            rows={4}
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            className="mt-1 w-full rounded border border-ink-500 bg-ink-900 px-3 py-2 text-zinc-100 outline-none focus:border-amber"
-          />
-          <button
-            onClick={sendEmail}
-            className="mt-4 w-full rounded bg-amber py-3 font-semibold uppercase tracking-wide text-ink-950 hover:bg-amber-light"
-          >
-            Email Us
-          </button>
-          <p className="mt-3 text-xs text-zinc-500">
-            Opens your email app with the message ready to send to {CONTACT_EMAIL}.
-          </p>
+          <form className="kb-form rv" onSubmit={sendEmail}>
+            <h2>Request a quote</h2>
+            <p className="kb-body" style={{ fontSize: 15.5 }}>
+              Tell us about your crop, your space, and what you need the equipment to do.
+            </p>
+            <div className="kb-form-grid">
+              <label className="kb-field">
+                <span>Name</span>
+                <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" required />
+              </label>
+              <label className="kb-field">
+                <span>Phone</span>
+                <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="tel" />
+              </label>
+              <label className="kb-field">
+                <span>Email</span>
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+              </label>
+              <label className="kb-field">
+                <span>Interested in</span>
+                <select value={topic} onChange={(e) => setTopic(e.target.value)}>
+                  {TOPICS.map((t) => (
+                    <option key={t}>{t}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="kb-field kb-field--full">
+                <span>Message</span>
+                <textarea rows={5} value={message} onChange={(e) => setMessage(e.target.value)} required />
+              </label>
+            </div>
+            <button type="submit" className="kb-btn kb-btn--primary kb-btn--lg kb-btn--block">
+              Send inquiry
+            </button>
+            <p className="kb-fine">Opens your email app with the message ready to send to {CONTACT.email}.</p>
+          </form>
         </div>
-      </div>
+      </section>
     </PageShell>
   );
 }

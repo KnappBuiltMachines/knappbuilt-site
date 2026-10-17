@@ -1,75 +1,67 @@
-import Image from "next/image";
+import Link from "next/link";
 import PageShell from "@/components/PageShell";
+import { EQUIPMENT } from "@/lib/equipment";
 
-export const metadata = { title: "Equipment — Knapp-Built Machines" };
-
-const items: { name: string; img: string; desc: string }[] = [
-  {
-    name: "Vegetable Washer",
-    img: "/equipment/vegetable-washer.jpg",
-    desc: "A stainless-steel wash system that gently cleans produce in a water bath, then lifts it out on an inclined dewatering conveyor. An overhead spray bar gives a final rinse before the next stage.",
-  },
-  {
-    name: "Bin Washer",
-    img: "/equipment/bin-washer.jpg",
-    desc: "An enclosed wash cabinet for cleaning harvest bins, lugs, and totes. Internal spray manifolds blast away soil and debris, and a sloped hopper collects and drains the runoff.",
-  },
-  {
-    name: "Conveyor",
-    img: "/equipment/conveyor.jpg",
-    desc: "Motor-driven conveyors that move product smoothly between stations. Built in stainless steel with adjustable height and lengths sized to your line.",
-  },
-  {
-    name: "Cross-Over Conveyor",
-    img: "/equipment/crossover-conveyor.jpg",
-    desc: "An inclined conveyor that elevates product up and over equipment or from one line to the next, keeping flow continuous without manual handling.",
-  },
-  {
-    name: "Double Conveyor",
-    img: "/equipment/double-conveyor.jpg",
-    desc: "A two-tier conveyor with an integrated work shelf — ideal for inspection, sorting, and culling, with product moving on one level and packed goods or returns on the other.",
-  },
-  {
-    name: "Custom Fabrication",
-    img: "/equipment/custom-fabrication.jpg",
-    desc: "Have something specific in mind? We design and build custom stainless equipment engineered to your operation, footprint, and throughput.",
-  },
-];
+export const metadata = {
+  title: "Equipment",
+  description:
+    "Vegetable washers, bin washers, conveyors, cross-over and double conveyors, and custom stainless fabrication, built in-house in Hammonton, NJ.",
+};
 
 export default function Equipment() {
   return (
     <PageShell
       kicker="Equipment"
-      title={<>Machines built to <span className="text-amber">run</span></>}
+      title="Machines built to run."
+      dim="Sized to your line."
       intro="Custom agricultural packaging and vegetable processing equipment, built in-house in Hammonton, NJ."
     >
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {items.map((it) => (
-          <div key={it.name} className="bracket rounded-md border border-ink-500 bg-ink-800 p-6">
-            <div className="relative aspect-[4/3] overflow-hidden rounded bg-black">
-              {it.img ? (
-                <Image
-                  src={it.img}
-                  alt={it.name}
-                  fill
-                  sizes="(max-width:640px) 100vw, (max-width:1024px) 50vw, 33vw"
-                  className="object-contain"
-                />
-              ) : (
-                <div className="grid h-full w-full place-items-center text-zinc-600 text-sm">
-                  Custom builds
-                </div>
-              )}
-            </div>
-            <h3 className="mt-4 text-lg font-semibold text-white">{it.name}</h3>
-            <p className="mt-1 text-sm text-zinc-400 leading-relaxed">{it.desc}</p>
-          </div>
-        ))}
-      </div>
+      <nav className="kb-chips" aria-label="Jump to equipment">
+        <div className="kb-container kb-chips-row">
+          {EQUIPMENT.map((e) => (
+            <a key={e.slug} href={`#${e.slug}`}>{e.name}</a>
+          ))}
+        </div>
+      </nav>
 
-      <p className="mt-10 text-sm text-zinc-500">
-        Looking for something not shown here? <a href="/contact" className="text-amber hover:underline">Get in touch</a> — most of what we build is made to order.
-      </p>
+      {EQUIPMENT.map((e, n) => (
+        <section id={e.slug} key={e.slug} className={`kb-eq ${n % 2 ? "kb-section--alt" : ""}`}>
+          <div className={`kb-container kb-split ${n % 2 ? "kb-split--flip" : ""}`}>
+            <figure className="kb-eq-media rv">
+              <img src={e.img} alt={`${e.name} 3D model`} loading={n < 2 ? "eager" : "lazy"} decoding="async" />
+            </figure>
+            <div className="rv">
+              <p className="kb-eq-num">
+                <b>{String(n + 1).padStart(2, "0")}</b> / {String(EQUIPMENT.length).padStart(2, "0")} &middot; {e.category}
+              </p>
+              <h2 className="kb-h3">{e.name}</h2>
+              <p className="kb-lede">{e.desc}</p>
+              <ul className="kb-eq-points">
+                {e.points.map((p) => (
+                  <li key={p}>{p}</li>
+                ))}
+              </ul>
+              <div className="kb-actions kb-actions--left">
+                <Link href={`/contact?item=${e.slug}`} className="kb-btn kb-btn--ghost">
+                  Ask about the {e.name.toLowerCase()}
+                </Link>
+              </div>
+            </div>
+          </div>
+        </section>
+      ))}
+
+      <section className="kb-final">
+        <div className="kb-container rv">
+          <h2 className="kb-display kb-display--sm">
+            Not seeing it here?
+            <span className="kb-dim">Most of what we build is made to order.</span>
+          </h2>
+          <div className="kb-actions">
+            <Link href="/contact" className="kb-btn kb-btn--primary kb-btn--lg">Tell us what you need</Link>
+          </div>
+        </div>
+      </section>
     </PageShell>
   );
 }
